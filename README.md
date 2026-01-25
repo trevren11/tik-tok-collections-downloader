@@ -34,14 +34,7 @@ You need to extract cookies from your browser while logged into TikTok:
 1. Go to [tiktok.com](https://www.tiktok.com) and log in
 2. Open DevTools (F12 or right-click > Inspect)
 3. Go to **Application** tab > **Cookies** > `https://www.tiktok.com`
-4. Find and copy these cookie values:
-   - `sessionid`
-   - `sessionid_ss`
-   - `sid_tt`
-   - `sid_guard`
-   - `tt_chain_token`
-   - `tt_csrf_token`
-   - `msToken`
+4. Find and copy the `sessionid` cookie value
 
 #### Option B: Cookie Export Extension
 
