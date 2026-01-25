@@ -14,9 +14,12 @@ Modes:
 import argparse
 import json
 import logging
+import os
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -229,7 +232,7 @@ class TikTokClient:
                         data = response.json()
                         if "itemList" in data:
                             videos.extend(data["itemList"])
-                            logger.info(f"    Loaded {len(videos)} videos...")
+                            logger.info(f"    [{collection_name}] Loaded {len(videos)} videos...")
                     except Exception:
                         pass
 
@@ -258,12 +261,99 @@ class TikTokClient:
 
         return videos[:limit] if limit else videos
 
+    def get_favorites(self, limit: Optional[int] = None) -> list:
+        """Fetch favorited/liked videos (not in any specific collection)."""
+        videos = []
+
+        logger.info("Launching browser to fetch favorites...")
+        with sync_playwright() as p:
+            browser, context = self._create_context(p)
+            page = context.new_page()
+
+            def handle_response(response):
+                # TikTok uses various endpoints for favorites/liked videos
+                if any(x in response.url for x in ["favorite/item_list", "favorite_item_list", "liked/item_list", "like-list"]):
+                    try:
+                        data = response.json()
+                        if "itemList" in data:
+                            videos.extend(data["itemList"])
+                            logger.info(f"    [Favorites] Loaded {len(videos)} videos...")
+                    except Exception:
+                        pass
+
+            page.on("response", handle_response)
+
+            # Navigate to favorites page
+            page.goto("https://www.tiktok.com/@me", wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(2000)
+
+            # Try to click on the Favorites tab if it exists
+            try:
+                # Look for favorites tab - TikTok UI varies but typically has a favorites/liked tab
+                favorites_selectors = [
+                    'div[data-e2e="favorites-tab"]',
+                    'a[href*="favorites"]',
+                    'span:has-text("Favorites")',
+                    'div:has-text("Favorites"):not(:has(*))',
+                ]
+                for selector in favorites_selectors:
+                    try:
+                        if page.locator(selector).count() > 0:
+                            page.locator(selector).first.click()
+                            page.wait_for_timeout(2000)
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            # Scroll to load more
+            scroll_count = 0
+            max_scrolls = 50 if not limit else (limit // 30) + 2
+
+            while scroll_count < max_scrolls:
+                prev_count = len(videos)
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(1500)
+                scroll_count += 1
+
+                if len(videos) == prev_count:
+                    break
+                if limit and len(videos) >= limit:
+                    break
+
+            browser.close()
+
+        return videos[:limit] if limit else videos
+
 
 class VideoDownloader:
     """Downloads TikTok videos using yt-dlp."""
 
-    def __init__(self, download_dir: str):
+    def __init__(self, download_dir: str, cookies: dict = None):
         self.download_dir = Path(download_dir)
+        self.cookies = cookies or {}
+        self.cookies_file = self._create_cookies_file()
+
+    def _create_cookies_file(self) -> Optional[Path]:
+        """Create a Netscape-format cookies file for yt-dlp."""
+        if not self.cookies:
+            return None
+
+        cookies_path = self.download_dir / ".cookies.txt"
+        self.download_dir.mkdir(parents=True, exist_ok=True)
+
+        lines = ["# Netscape HTTP Cookie File", "# https://curl.haxx.se/rfc/cookie_spec.html", ""]
+
+        for name, value in self.cookies.items():
+            if value:  # Only include non-empty cookies
+                # Format: domain, flag, path, secure, expiration, name, value
+                lines.append(f".tiktok.com\tTRUE\t/\tTRUE\t0\t{name}\t{value}")
+
+        with open(cookies_path, "w") as f:
+            f.write("\n".join(lines))
+
+        return cookies_path
 
     def download(self, video_id: str, author: str, collection_name: str, description: str = "") -> Optional[str]:
         """
@@ -280,14 +370,21 @@ class VideoDownloader:
         output_template = str(video_dir / f"{video_id}.%(ext)s")
 
         try:
+            cmd = [
+                sys.executable, "-m", "yt_dlp",
+                "--no-warnings",
+                "-o", output_template,
+                "--write-info-json",
+            ]
+
+            # Add cookies file for authenticated access to restricted content
+            if self.cookies_file and self.cookies_file.exists():
+                cmd.extend(["--cookies", str(self.cookies_file)])
+
+            cmd.append(video_url)
+
             result = subprocess.run(
-                [
-                    sys.executable, "-m", "yt_dlp",
-                    "--no-warnings",
-                    "-o", output_template,
-                    "--write-info-json",
-                    video_url,
-                ],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=180,
@@ -329,8 +426,84 @@ def load_config(config_path: str = "config.json") -> dict:
         return json.load(f)
 
 
-def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[int] = None, video_limit: Optional[int] = None):
-    """Sync collections and videos, queue new downloads."""
+def _download_collection_videos(store: DataStore, downloader: "VideoDownloader", collection_id: str) -> int:
+    """Download pending videos for a specific collection. Returns count of successful downloads."""
+    pending = [v for v in store.get_pending_downloads() if v.get("collection") == store.collections.get(collection_id, {}).get("name") or (collection_id == "_favorites" and v.get("collection") == "Favorites")]
+
+    if not pending:
+        return 0
+
+    success_count = 0
+    for i, item in enumerate(pending, 1):
+        vid_id = item["id"]
+        author = item.get("author", "unknown")
+        collection = item.get("collection", "uncategorized")
+        desc = item.get("desc", "")
+
+        logger.info(f"    [{i}/{len(pending)}] Downloading {vid_id} (@{author})")
+
+        path = downloader.download(vid_id, author, collection, desc)
+
+        if path:
+            store.mark_downloaded(vid_id, path)
+            logger.info(f"      Success: {path}")
+            success_count += 1
+        else:
+            store.mark_failed(vid_id, "Download failed")
+            logger.warning("      Failed!")
+
+        store.save_queue()
+        store.save_videos()
+
+    return success_count
+
+
+def _process_collection_videos(store: DataStore, coll_id: str, coll_name: str, videos: list) -> tuple:
+    """Process fetched videos for a collection. Returns (new_count, queued_count, deleted_count, found_ids)."""
+    found_video_ids = set()
+    new_count = 0
+    queued_count = 0
+    deleted_count = 0
+
+    for vid in videos:
+        vid_id = vid.get("id")
+        if not vid_id:
+            continue
+
+        found_video_ids.add(vid_id)
+        author = vid.get("author", {}).get("uniqueId", "unknown")
+        video_data = {
+            "id": vid_id,
+            "author": author,
+            "desc": vid.get("desc", ""),
+            "collection_id": coll_id,
+            "collection_name": coll_name,
+            "url": f"https://www.tiktok.com/@{author}/video/{vid_id}",
+            "create_time": vid.get("createTime"),
+            "stats": vid.get("stats", {}),
+            "deleted_from_tiktok": False,
+        }
+
+        is_new = store.add_video(vid_id, video_data)
+        if is_new:
+            new_count += 1
+            if store.queue_download(vid_id, video_data):
+                queued_count += 1
+
+    # Check for videos that were in this collection but are now missing
+    for vid_id, vid_data in list(store.videos.items()):
+        if vid_data.get("collection_id") == coll_id:
+            if vid_id not in found_video_ids and not vid_data.get("deleted_from_tiktok"):
+                vid_data["deleted_from_tiktok"] = True
+                vid_data["deleted_at"] = datetime.now().isoformat()
+                deleted_count += 1
+                logger.info(f"  [{coll_name}] Marked as deleted: {vid_id}")
+
+    return new_count, queued_count, deleted_count, found_video_ids
+
+
+def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[int] = None, video_limit: Optional[int] = None, downloader: Optional[VideoDownloader] = None, max_parallel: int = 10):
+    """Sync collections and videos, queue new downloads. Optionally download after each collection."""
     logger.info("=== SYNC MODE ===")
 
     # Step 1: Fetch collections
@@ -348,67 +521,126 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
         })
     store.save_collections()
 
-    # Step 2: Fetch videos for each collection
+    # Step 2: Fetch videos for each collection (in parallel)
     collections_to_process = list(store.collections.values())
     if collection_limit:
         collections_to_process = collections_to_process[:collection_limit]
 
     new_videos = 0
-    queued = 0
-
+    downloaded = 0
     deleted_count = 0
 
-    for coll in collections_to_process:
+    logger.info(f"Fetching videos from {len(collections_to_process)} collections (up to {max_parallel} in parallel)...")
+
+    def fetch_worker(coll):
+        """Worker function to fetch videos for a collection."""
         coll_id = coll["id"]
         coll_name = coll["name"]
-        logger.info(f"Fetching videos from: {coll_name}")
+        thread_id = threading.current_thread().name
+        logger.info(f"  [{thread_id}] Starting fetch: {coll_name}")
+        try:
+            videos = client.get_collection_videos(coll_id, coll_name, limit=video_limit)
+            logger.info(f"  [{thread_id}] Finished fetch: {coll_name} ({len(videos)} videos)")
+            return {"coll_id": coll_id, "coll_name": coll_name, "videos": videos, "error": None}
+        except Exception as e:
+            logger.error(f"  [{thread_id}] Error fetching {coll_name}: {e}")
+            return {"coll_id": coll_id, "coll_name": coll_name, "videos": [], "error": str(e)}
 
-        videos = client.get_collection_videos(coll_id, coll_name, limit=video_limit)
-        logger.info(f"  Found {len(videos)} videos")
+    # Submit all collection fetches to thread pool
+    with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+        future_to_coll = {executor.submit(fetch_worker, coll): coll for coll in collections_to_process}
 
-        # Track which video IDs we found in this sync
-        found_video_ids = set()
+        # Process results as they complete
+        for future in as_completed(future_to_coll):
+            result = future.result()
+            coll_id = result["coll_id"]
+            coll_name = result["coll_name"]
+            videos = result["videos"]
 
-        for vid in videos:
-            vid_id = vid.get("id")
-            if not vid_id:
+            logger.info(f"  {coll_name}: Found {len(videos)} videos")
+
+            if result["error"]:
                 continue
 
-            found_video_ids.add(vid_id)
-            author = vid.get("author", {}).get("uniqueId", "unknown")
-            video_data = {
-                "id": vid_id,
-                "author": author,
-                "desc": vid.get("desc", ""),
-                "collection_id": coll_id,
-                "collection_name": coll_name,
-                "url": f"https://www.tiktok.com/@{author}/video/{vid_id}",
-                "create_time": vid.get("createTime"),
-                "stats": vid.get("stats", {}),
-                "deleted_from_tiktok": False,  # Mark as not deleted since we found it
-            }
+            # Process the fetched videos
+            new_count, queued_count, del_count, _ = _process_collection_videos(
+                store, coll_id, coll_name, videos
+            )
+            new_videos += new_count
+            deleted_count += del_count
 
-            is_new = store.add_video(vid_id, video_data)
-            if is_new:
-                new_videos += 1
-                if store.queue_download(vid_id, video_data):
-                    queued += 1
+            # Download immediately if downloader is provided
+            if downloader and queued_count > 0:
+                store.save_videos()
+                store.save_queue()
+                logger.info(f"  Downloading {queued_count} new videos from {coll_name}...")
+                downloaded += _download_collection_videos(store, downloader, coll_id)
 
-        # Check for videos that were in this collection but are now missing
-        for vid_id, vid_data in store.videos.items():
-            if vid_data.get("collection_id") == coll_id:
-                if vid_id not in found_video_ids and not vid_data.get("deleted_from_tiktok"):
-                    vid_data["deleted_from_tiktok"] = True
-                    vid_data["deleted_at"] = datetime.now().isoformat()
-                    deleted_count += 1
-                    logger.info(f"  Marked as deleted: {vid_id}")
+    # Step 3: Fetch favorited videos (not in any collection)
+    logger.info("Fetching favorited videos (not in collections)...")
+    favorites = client.get_favorites(limit=video_limit)
+    logger.info(f"Found {len(favorites)} favorited videos")
+
+    # Track which favorites we found
+    found_favorite_ids = set()
+    favorites_new = 0
+    favorites_queued = 0
+
+    for vid in favorites:
+        vid_id = vid.get("id")
+        if not vid_id:
+            continue
+
+        # Skip if this video is already in a collection
+        if vid_id in store.videos and store.videos[vid_id].get("collection_id") != "_favorites":
+            continue
+
+        found_favorite_ids.add(vid_id)
+        author = vid.get("author", {}).get("uniqueId", "unknown")
+        video_data = {
+            "id": vid_id,
+            "author": author,
+            "desc": vid.get("desc", ""),
+            "collection_id": "_favorites",
+            "collection_name": "Favorites",
+            "url": f"https://www.tiktok.com/@{author}/video/{vid_id}",
+            "create_time": vid.get("createTime"),
+            "stats": vid.get("stats", {}),
+            "deleted_from_tiktok": False,
+        }
+
+        is_new = store.add_video(vid_id, video_data)
+        if is_new:
+            favorites_new += 1
+            new_videos += 1
+            if store.queue_download(vid_id, video_data):
+                favorites_queued += 1
+
+    # Check for favorites that are now missing
+    for vid_id, vid_data in store.videos.items():
+        if vid_data.get("collection_id") == "_favorites":
+            if vid_id not in found_favorite_ids and not vid_data.get("deleted_from_tiktok"):
+                vid_data["deleted_from_tiktok"] = True
+                vid_data["deleted_at"] = datetime.now().isoformat()
+                deleted_count += 1
+                logger.info(f"  Marked favorite as deleted: {vid_id}")
+
+    if favorites_new > 0:
+        logger.info(f"  New favorites: {favorites_new}, queued: {favorites_queued}")
+
+    # Download favorites immediately if downloader is provided
+    if downloader and favorites_queued > 0:
+        store.save_videos()
+        store.save_queue()
+        logger.info(f"  Downloading {favorites_queued} new favorites...")
+        downloaded += _download_collection_videos(store, downloader, "_favorites")
 
     store.save_videos()
     store.save_queue()
 
     logger.info("=== SYNC COMPLETE ===")
     logger.info(f"New videos found: {new_videos}")
-    logger.info(f"Queued for download: {queued}")
+    logger.info(f"Downloaded: {downloaded}")
     logger.info(f"Marked as deleted from TikTok: {deleted_count}")
     logger.info(f"Pending downloads: {len(store.get_pending_downloads())}")
 
@@ -459,10 +691,10 @@ def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloade
         try:
             logger.info("Starting sync cycle...")
 
-            # Sync first
-            cmd_sync(client, store)
+            # Sync and download - downloads happen after each collection
+            cmd_sync(client, store, downloader=downloader)
 
-            # Then download
+            # Process any remaining downloads (e.g., from previous failed attempts)
             cmd_download(store, downloader)
 
             logger.info(f"Next check in {interval} minutes...")
@@ -614,12 +846,14 @@ def main():
         logger.error("No sessionid found in config.json")
         sys.exit(1)
 
-    download_dir = config.get("download_dir", "./downloads")
+    # Environment variable overrides config (useful for Docker)
+    download_dir = os.environ.get("DOWNLOAD_DIR") or config.get("download_dir", "./downloads")
 
     # Initialize
     client = TikTokClient(sessionid)
     store = DataStore(download_dir)
-    downloader = VideoDownloader(download_dir)
+    cookies = config.get("cookies", {})
+    downloader = VideoDownloader(download_dir, cookies)
 
     logger.info(f"Data/Download dir: {download_dir}")
 

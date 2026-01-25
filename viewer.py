@@ -12,7 +12,7 @@ import os
 import sys
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 def load_config(config_path: str = "config.json") -> dict:
@@ -46,6 +46,8 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             self.send_json(self.get_videos(collection_id))
         elif path == "/api/status":
             self.send_json(self.get_status())
+        elif path == "/api/config":
+            self.send_json({"download_dir": self.data_dir})
         elif path.startswith("/video/"):
             self.serve_video(path[7:])  # Strip /video/ prefix
         elif path == "/" or path == "/index.html":
@@ -78,20 +80,26 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def _safe_load_json(self, filepath: Path, default=None):
+        """Safely load JSON file, returning default if file is being written or corrupt."""
+        if default is None:
+            default = {}
+        if not filepath.exists():
+            return default
+        try:
+            with open(filepath) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            # File is being written or is corrupt - return default
+            return default
+
     def get_collections(self) -> list:
         """Get all collections with video counts."""
         collections_file = Path(self.data_dir) / "collections.json"
         videos_file = Path(self.data_dir) / "videos.json"
 
-        collections = {}
-        if collections_file.exists():
-            with open(collections_file) as f:
-                collections = json.load(f)
-
-        videos = {}
-        if videos_file.exists():
-            with open(videos_file) as f:
-                videos = json.load(f)
+        collections = self._safe_load_json(collections_file, {})
+        videos = self._safe_load_json(videos_file, {})
 
         result = []
         for coll_id, coll in collections.items():
@@ -110,12 +118,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
     def get_videos(self, collection_id: str = None) -> list:
         """Get videos, optionally filtered by collection."""
         videos_file = Path(self.data_dir) / "videos.json"
-
-        if not videos_file.exists():
-            return []
-
-        with open(videos_file) as f:
-            videos = json.load(f)
+        videos = self._safe_load_json(videos_file, {})
 
         result = []
         for vid_id, vid in videos.items():
@@ -154,17 +157,10 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         queue_file = Path(self.data_dir) / "download_queue.json"
         videos_file = Path(self.data_dir) / "videos.json"
 
-        deleted_count = 0
-        if videos_file.exists():
-            with open(videos_file) as f:
-                videos = json.load(f)
-                deleted_count = sum(1 for v in videos.values() if v.get("deleted_from_tiktok"))
+        videos = self._safe_load_json(videos_file, {})
+        deleted_count = sum(1 for v in videos.values() if v.get("deleted_from_tiktok"))
 
-        if not queue_file.exists():
-            return {"pending": 0, "completed": 0, "failed": 0, "deleted": deleted_count}
-
-        with open(queue_file) as f:
-            queue = json.load(f)
+        queue = self._safe_load_json(queue_file, {})
 
         return {
             "pending": len(queue.get("pending", [])),
@@ -180,11 +176,9 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         videos_file = Path(self.data_dir) / "videos.json"
         queue_file = Path(self.data_dir) / "download_queue.json"
 
-        if not videos_file.exists():
-            return {"success": False, "error": "No videos found"}
-
-        with open(videos_file) as f:
-            videos = json.load(f)
+        videos = self._safe_load_json(videos_file, {})
+        if not videos:
+            return {"success": False, "error": "No videos found or file busy"}
 
         if video_id not in videos:
             return {"success": False, "error": "Video not found"}
@@ -206,27 +200,33 @@ class ViewerHandler(SimpleHTTPRequestHandler):
 
         # Remove from videos
         del videos[video_id]
-        with open(videos_file, "w") as f:
-            json.dump(videos, f, indent=2)
+        try:
+            with open(videos_file, "w") as f:
+                json.dump(videos, f, indent=2)
+        except IOError:
+            return {"success": False, "error": "Could not save videos file"}
 
         # Update queue
-        if queue_file.exists():
-            with open(queue_file) as f:
-                queue = json.load(f)
-
+        queue = self._safe_load_json(queue_file, {})
+        if queue:
             queue["pending"] = [v for v in queue.get("pending", []) if v["id"] != video_id]
             queue["failed"] = [v for v in queue.get("failed", []) if v["id"] != video_id]
             if video_id in queue.get("completed", []):
                 queue["completed"].remove(video_id)
 
-            with open(queue_file, "w") as f:
-                json.dump(queue, f, indent=2)
+            try:
+                with open(queue_file, "w") as f:
+                    json.dump(queue, f, indent=2)
+            except IOError:
+                pass  # Non-critical, queue will be updated on next sync
 
         return {"success": True, "deleted_path": deleted_path}
 
     def serve_video(self, video_path: str):
         """Serve a video file from the download directory."""
         # video_path format: collection_name/video_id/filename
+        # URL-decode the path to handle spaces and special characters
+        video_path = unquote(video_path)
         full_path = Path(self.data_dir) / video_path
 
         if not full_path.exists() or not full_path.is_file():
@@ -246,14 +246,60 @@ class ViewerHandler(SimpleHTTPRequestHandler):
 
         file_size = full_path.stat().st_size
 
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", file_size)
-        self.send_header("Accept-Ranges", "bytes")
-        self.end_headers()
+        # Handle range requests for video streaming
+        range_header = self.headers.get("Range")
+        if range_header:
+            # Parse range header (e.g., "bytes=0-" or "bytes=0-1024")
+            range_match = range_header.replace("bytes=", "").split("-")
+            start = int(range_match[0]) if range_match[0] else 0
+            end = int(range_match[1]) if range_match[1] else file_size - 1
 
-        with open(full_path, "rb") as f:
-            self.wfile.write(f.read())
+            # Ensure valid range
+            if start >= file_size:
+                self.send_error(416, "Range Not Satisfiable")
+                return
+
+            end = min(end, file_size - 1)
+            content_length = end - start + 1
+
+            self.send_response(206)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", content_length)
+            self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
+
+            try:
+                with open(full_path, "rb") as f:
+                    f.seek(start)
+                    remaining = content_length
+                    chunk_size = 64 * 1024
+                    while remaining > 0:
+                        chunk = f.read(min(chunk_size, remaining))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        else:
+            # No range request - send full file
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", file_size)
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
+
+            try:
+                with open(full_path, "rb") as f:
+                    chunk_size = 64 * 1024
+                    while True:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     def serve_index(self):
         """Serve the main HTML page."""
@@ -346,9 +392,10 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-shrink: 0;
         }
         .videos-header h2 { font-size: 16px; }
-        .filter-buttons button {
+        .filter-buttons button, .view-buttons button {
             background: #2a2a2a;
             border: none;
             color: #fff;
@@ -357,17 +404,72 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             cursor: pointer;
             margin-left: 5px;
         }
-        .filter-buttons button.active { background: #fe2c55; }
+        .filter-buttons button.active, .view-buttons button.active { background: #fe2c55; }
+        .view-buttons { margin-left: 20px; }
+        .view-buttons button { font-size: 14px; padding: 6px 10px; }
 
         .videos-grid {
-            flex: 1;
             overflow-y: auto;
             padding: 20px;
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 20px;
             align-content: start;
         }
+        /* View mode: small */
+        .videos-grid.view-small {
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 15px;
+        }
+        .videos-grid.view-small .video-card video,
+        .videos-grid.view-small .video-thumbnail {
+            height: 320px;
+            min-height: 320px;
+        }
+        .videos-grid.view-small .video-info { padding: 8px; }
+        .videos-grid.view-small .video-author { font-size: 12px; }
+        .videos-grid.view-small .video-desc { font-size: 11px; -webkit-line-clamp: 2; }
+        /* View mode: large */
+        .videos-grid.view-large {
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 25px;
+        }
+        .videos-grid.view-large .video-card video,
+        .videos-grid.view-large .video-thumbnail {
+            height: 570px;
+            min-height: 570px;
+        }
+        .videos-grid.view-large .video-info { padding: 15px; }
+        .videos-grid.view-large .video-desc { -webkit-line-clamp: 3; }
+        /* View mode: list */
+        .videos-grid.view-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .videos-grid.view-list .video-card {
+            display: flex;
+            flex-direction: row;
+            min-height: 120px;
+            flex-shrink: 0;
+        }
+        .videos-grid.view-list .video-card video,
+        .videos-grid.view-list .video-thumbnail {
+            width: 68px;
+            height: 120px;
+            min-height: 120px;
+            min-width: 68px;
+            aspect-ratio: auto;
+            flex-shrink: 0;
+        }
+        .videos-grid.view-list .video-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 12px 20px;
+        }
+        .videos-grid.view-list .video-desc { -webkit-line-clamp: 2; }
         .video-card {
             background: #1a1a1a;
             border-radius: 8px;
@@ -387,7 +489,9 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             margin-top: 4px;
         }
         .video-thumbnail {
-            aspect-ratio: 9/16;
+            width: 100%;
+            height: 390px;
+            min-height: 390px;
             background: #2a2a2a;
             display: flex;
             align-items: center;
@@ -397,7 +501,8 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         }
         .video-card video {
             width: 100%;
-            aspect-ratio: 9/16;
+            height: 390px;
+            min-height: 390px;
             object-fit: cover;
         }
         .video-info {
@@ -528,6 +633,37 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             font-size: 14px;
         }
         .modal-delete:hover { background: #c9302c; }
+        .modal-path {
+            font-size: 11px;
+            color: #666;
+            background: #0f0f0f;
+            padding: 8px 10px;
+            border-radius: 4px;
+            margin-top: 15px;
+            word-break: break-all;
+            font-family: monospace;
+        }
+        .modal-path-label {
+            color: #888;
+            margin-bottom: 4px;
+            display: block;
+        }
+        .download-dir {
+            font-size: 11px;
+            color: #666;
+            margin-top: 10px;
+            word-break: break-all;
+            font-family: monospace;
+            background: #0f0f0f;
+            padding: 6px 8px;
+            border-radius: 4px;
+        }
+        .download-dir-label {
+            color: #888;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin-bottom: 2px;
+            display: block;
+        }
 
         .empty-state {
             text-align: center;
@@ -541,6 +677,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         <div class="sidebar-header">
             <h1>TikTok Collections</h1>
             <div class="status" id="status">Loading...</div>
+            <div class="download-dir" id="download-dir"></div>
         </div>
         <div class="collections-list" id="collections"></div>
     </aside>
@@ -548,11 +685,19 @@ class ViewerHandler(SimpleHTTPRequestHandler):
     <main class="main">
         <div class="videos-header">
             <h2 id="current-collection">All Videos</h2>
-            <div class="filter-buttons">
-                <button id="filter-all" class="active">All</button>
-                <button id="filter-downloaded">Downloaded</button>
-                <button id="filter-pending">Pending</button>
-                <button id="filter-deleted">Deleted</button>
+            <div style="display: flex; align-items: center;">
+                <div class="filter-buttons">
+                    <button id="filter-all" class="active">All</button>
+                    <button id="filter-downloaded">Downloaded</button>
+                    <button id="filter-pending">Pending</button>
+                    <button id="filter-deleted">Deleted</button>
+                </div>
+                <div class="view-buttons">
+                    <button id="view-list" title="List view">☰</button>
+                    <button id="view-small" title="Small grid">▪▪</button>
+                    <button id="view-medium" class="active" title="Medium grid">◼◼</button>
+                    <button id="view-large" title="Large grid">⬛</button>
+                </div>
             </div>
         </div>
         <div class="videos-grid" id="videos"></div>
@@ -570,6 +715,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                 <div class="modal-caption" id="modal-caption"></div>
                 <div class="modal-stats" id="modal-stats"></div>
                 <a class="modal-link" id="modal-link" href="#" target="_blank">View on TikTok</a>
+                <div class="modal-path" id="modal-path"></div>
                 <button class="modal-delete" id="modal-delete" onclick="deleteCurrentVideo()">Delete Video</button>
             </div>
         </div>
@@ -581,21 +727,43 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         let currentCollection = null;
         let currentFilter = 'all';
         let currentVideoId = null;
+        let currentView = 'medium';
+        let downloadDir = '';
 
         async function loadData() {
-            const [collectionsRes, videosRes, statusRes] = await Promise.all([
-                fetch('/api/collections'),
-                fetch('/api/videos'),
-                fetch('/api/status')
-            ]);
+            try {
+                const [collectionsRes, videosRes, statusRes, configRes] = await Promise.all([
+                    fetch('/api/collections'),
+                    fetch('/api/videos'),
+                    fetch('/api/status'),
+                    fetch('/api/config')
+                ]);
 
-            collections = await collectionsRes.json();
-            videos = await videosRes.json();
-            const status = await statusRes.json();
+                collections = await collectionsRes.json();
+                videos = await videosRes.json();
+                const status = await statusRes.json();
+                const config = await configRes.json();
+                downloadDir = config.download_dir;
 
-            renderStatus(status);
-            renderCollections();
-            renderVideos();
+                console.log('Loaded', videos.length, 'videos,', collections.length, 'collections');
+                console.log('Download dir:', downloadDir);
+
+                renderStatus(status);
+                renderDownloadDir();
+                renderCollections();
+                renderVideos();
+            } catch (err) {
+                console.error('Failed to load data:', err);
+                document.getElementById('videos').innerHTML =
+                    '<div class="empty-state">Error loading videos: ' + err.message + '</div>';
+            }
+        }
+
+        function renderDownloadDir() {
+            document.getElementById('download-dir').innerHTML = `
+                <span class="download-dir-label">Download folder:</span>
+                ${escapeHtml(downloadDir)}
+            `;
         }
 
         function renderStatus(status) {
@@ -661,8 +829,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
 
             let html = '';
             for (const video of filtered) {
-                const videoUrl = video.download_path ?
-                    `/video/${video.download_path.split('/').slice(-3).join('/')}` : null;
+                const videoUrl = getVideoUrl(video.download_path);
 
                 const classes = ['video-card'];
                 if (!video.downloaded) classes.push('not-downloaded');
@@ -672,7 +839,11 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                     <div class="${classes.join(' ')}"
                          onclick="openModal('${video.id}')">
                         ${videoUrl ?
-                            `<video src="${videoUrl}" muted preload="metadata"></video>` :
+                            `<video src="${videoUrl}" muted playsinline preload="auto"
+                                onloadeddata="this.parentElement.classList.add('loaded')"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                            ></video>
+                            <div class="video-thumbnail" style="display:none;">Failed to load</div>` :
                             `<div class="video-thumbnail">Not downloaded</div>`
                         }
                         <div class="video-info">
@@ -699,6 +870,13 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             renderVideos();
         }
 
+        function getVideoUrl(downloadPath) {
+            if (!downloadPath) return null;
+            // Get last 3 path components and URL-encode each one
+            const parts = downloadPath.split('/').slice(-3);
+            return '/video/' + parts.map(p => encodeURIComponent(p)).join('/');
+        }
+
         function openModal(videoId) {
             const video = videos.find(v => v.id === videoId);
             if (!video) return;
@@ -708,7 +886,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             const modalVideo = document.getElementById('modal-video');
 
             if (video.download_path) {
-                const videoUrl = `/video/${video.download_path.split('/').slice(-3).join('/')}`;
+                const videoUrl = getVideoUrl(video.download_path);
                 modalVideo.src = videoUrl;
                 modalVideo.style.display = 'block';
             } else {
@@ -737,6 +915,15 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                     <div class="stat-label">Comments</div>
                 </div>
             `;
+
+            // Show file path
+            const pathEl = document.getElementById('modal-path');
+            if (video.download_path) {
+                pathEl.innerHTML = `<span class="modal-path-label">File location:</span>${escapeHtml(video.download_path)}`;
+                pathEl.style.display = 'block';
+            } else {
+                pathEl.style.display = 'none';
+            }
 
             modal.classList.add('active');
             if (video.download_path) {
@@ -796,11 +983,27 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             }
         }
 
+        function setView(view) {
+            currentView = view;
+            const grid = document.getElementById('videos');
+            grid.classList.remove('view-list', 'view-small', 'view-large');
+            if (view !== 'medium') {
+                grid.classList.add('view-' + view);
+            }
+            document.querySelectorAll('.view-buttons button').forEach(b => b.classList.remove('active'));
+            document.getElementById('view-' + view).classList.add('active');
+        }
+
         // Event listeners
         document.getElementById('filter-all').onclick = () => setFilter('all');
         document.getElementById('filter-downloaded').onclick = () => setFilter('downloaded');
         document.getElementById('filter-pending').onclick = () => setFilter('pending');
         document.getElementById('filter-deleted').onclick = () => setFilter('deleted');
+
+        document.getElementById('view-list').onclick = () => setView('list');
+        document.getElementById('view-small').onclick = () => setView('small');
+        document.getElementById('view-medium').onclick = () => setView('medium');
+        document.getElementById('view-large').onclick = () => setView('large');
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeModal();
@@ -813,8 +1016,11 @@ class ViewerHandler(SimpleHTTPRequestHandler):
 </html>'''
 
     def log_message(self, format, *args):
-        # Suppress default logging for cleaner output
-        pass
+        # Log requests for debugging - use format string safely
+        try:
+            print(format % args)
+        except Exception:
+            print(f"[LOG] {args}")
 
 
 def main():
@@ -826,7 +1032,8 @@ def main():
     args = parser.parse_args()
 
     config = load_config()
-    data_dir = config.get("download_dir", "./downloads")
+    # Environment variable overrides config (useful for Docker)
+    data_dir = os.environ.get("DOWNLOAD_DIR") or config.get("download_dir", "./downloads")
 
     if not Path(data_dir).exists():
         print(f"Warning: Data directory not found: {data_dir}")

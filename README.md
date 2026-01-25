@@ -10,6 +10,7 @@ This tool uses your TikTok session cookies to access your personal collections (
 
 - [x] List all your TikTok collections
 - [x] Download videos from collections
+- [x] Download favorited videos (not in any collection)
 - [x] Save metadata (captions, author info, stats)
 - [x] Organize into folders by collection name
 - [x] Monitor for new videos (watch mode)
