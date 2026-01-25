@@ -144,6 +144,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                 "download_path": download_path if has_file else None,
                 "stats": vid.get("stats", {}),
                 "create_time": vid.get("create_time"),
+                "deleted_from_tiktok": vid.get("deleted_from_tiktok", False),
             })
 
         return sorted(result, key=lambda x: x.get("create_time") or 0, reverse=True)
@@ -151,9 +152,16 @@ class ViewerHandler(SimpleHTTPRequestHandler):
     def get_status(self) -> dict:
         """Get download queue status."""
         queue_file = Path(self.data_dir) / "download_queue.json"
+        videos_file = Path(self.data_dir) / "videos.json"
+
+        deleted_count = 0
+        if videos_file.exists():
+            with open(videos_file) as f:
+                videos = json.load(f)
+                deleted_count = sum(1 for v in videos.values() if v.get("deleted_from_tiktok"))
 
         if not queue_file.exists():
-            return {"pending": 0, "completed": 0, "failed": 0}
+            return {"pending": 0, "completed": 0, "failed": 0, "deleted": deleted_count}
 
         with open(queue_file) as f:
             queue = json.load(f)
@@ -162,6 +170,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             "pending": len(queue.get("pending", [])),
             "completed": len(queue.get("completed", [])),
             "failed": len(queue.get("failed", [])),
+            "deleted": deleted_count,
         }
 
     def delete_video(self, video_id: str) -> dict:
@@ -368,6 +377,15 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         }
         .video-card:hover { transform: scale(1.02); }
         .video-card.not-downloaded { opacity: 0.5; }
+        .video-card.deleted { border: 2px solid #d9534f; }
+        .video-card.deleted .video-info::after {
+            content: "DELETED FROM TIKTOK";
+            display: block;
+            color: #d9534f;
+            font-size: 10px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
         .video-thumbnail {
             aspect-ratio: 9/16;
             background: #2a2a2a;
@@ -534,6 +552,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                 <button id="filter-all" class="active">All</button>
                 <button id="filter-downloaded">Downloaded</button>
                 <button id="filter-pending">Pending</button>
+                <button id="filter-deleted">Deleted</button>
             </div>
         </div>
         <div class="videos-grid" id="videos"></div>
@@ -584,6 +603,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                 <span class="pending">${status.pending} pending</span>
                 <span class="completed">${status.completed} done</span>
                 <span class="failed">${status.failed} failed</span>
+                ${status.deleted ? `<span class="failed">${status.deleted} deleted</span>` : ''}
             `;
         }
 
@@ -629,7 +649,9 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             if (currentFilter === 'downloaded') {
                 filtered = filtered.filter(v => v.downloaded);
             } else if (currentFilter === 'pending') {
-                filtered = filtered.filter(v => !v.downloaded);
+                filtered = filtered.filter(v => !v.downloaded && !v.deleted_from_tiktok);
+            } else if (currentFilter === 'deleted') {
+                filtered = filtered.filter(v => v.deleted_from_tiktok);
             }
 
             if (filtered.length === 0) {
@@ -642,8 +664,12 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                 const videoUrl = video.download_path ?
                     `/video/${video.download_path.split('/').slice(-3).join('/')}` : null;
 
+                const classes = ['video-card'];
+                if (!video.downloaded) classes.push('not-downloaded');
+                if (video.deleted_from_tiktok) classes.push('deleted');
+
                 html += `
-                    <div class="video-card ${!video.downloaded ? 'not-downloaded' : ''}"
+                    <div class="${classes.join(' ')}"
                          onclick="openModal('${video.id}')">
                         ${videoUrl ?
                             `<video src="${videoUrl}" muted preload="metadata"></video>` :
@@ -774,6 +800,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         document.getElementById('filter-all').onclick = () => setFilter('all');
         document.getElementById('filter-downloaded').onclick = () => setFilter('downloaded');
         document.getElementById('filter-pending').onclick = () => setFilter('pending');
+        document.getElementById('filter-deleted').onclick = () => setFilter('deleted');
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeModal();

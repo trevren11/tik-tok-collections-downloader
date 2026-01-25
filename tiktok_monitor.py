@@ -343,6 +343,8 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
     new_videos = 0
     queued = 0
 
+    deleted_count = 0
+
     for coll in collections_to_process:
         coll_id = coll["id"]
         coll_name = coll["name"]
@@ -351,11 +353,15 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
         videos = client.get_collection_videos(coll_id, coll_name, limit=video_limit)
         print(f"  Found {len(videos)} videos")
 
+        # Track which video IDs we found in this sync
+        found_video_ids = set()
+
         for vid in videos:
             vid_id = vid.get("id")
             if not vid_id:
                 continue
 
+            found_video_ids.add(vid_id)
             author = vid.get("author", {}).get("uniqueId", "unknown")
             video_data = {
                 "id": vid_id,
@@ -366,6 +372,7 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
                 "url": f"https://www.tiktok.com/@{author}/video/{vid_id}",
                 "create_time": vid.get("createTime"),
                 "stats": vid.get("stats", {}),
+                "deleted_from_tiktok": False,  # Mark as not deleted since we found it
             }
 
             is_new = store.add_video(vid_id, video_data)
@@ -374,12 +381,22 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
                 if store.queue_download(vid_id, video_data):
                     queued += 1
 
+        # Check for videos that were in this collection but are now missing
+        for vid_id, vid_data in store.videos.items():
+            if vid_data.get("collection_id") == coll_id:
+                if vid_id not in found_video_ids and not vid_data.get("deleted_from_tiktok"):
+                    vid_data["deleted_from_tiktok"] = True
+                    vid_data["deleted_at"] = datetime.now().isoformat()
+                    deleted_count += 1
+                    print(f"  Marked as deleted: {vid_id}")
+
     store.save_videos()
     store.save_queue()
 
     print(f"\n=== SYNC COMPLETE ===")
     print(f"New videos found: {new_videos}")
     print(f"Queued for download: {queued}")
+    print(f"Marked as deleted from TikTok: {deleted_count}")
     print(f"Pending downloads: {len(store.get_pending_downloads())}")
 
 
@@ -511,9 +528,12 @@ def cmd_delete(store: DataStore, video_ids: list, delete_all: bool = False):
 
 def cmd_status(store: DataStore):
     """Show current status."""
+    deleted_videos = [v for v in store.videos.values() if v.get("deleted_from_tiktok")]
+
     print("\n=== STATUS ===")
     print(f"Collections: {len(store.collections)}")
     print(f"Videos tracked: {len(store.videos)}")
+    print(f"Deleted from TikTok: {len(deleted_videos)}")
     print(f"Pending downloads: {len(store.queue['pending'])}")
     print(f"Completed downloads: {len(store.queue['completed'])}")
     print(f"Failed downloads: {len(store.queue['failed'])}")
@@ -526,8 +546,22 @@ def cmd_status(store: DataStore):
             # Count videos in this collection
             coll_videos = [v for v in store.videos.values() if v.get("collection_id") == coll_id]
             downloaded = sum(1 for v in coll_videos if v.get("downloaded"))
+            deleted = sum(1 for v in coll_videos if v.get("deleted_from_tiktok"))
             total = len(coll_videos)
-            print(f"  {coll_name}: {downloaded}/{total} downloaded")
+            status = f"{downloaded}/{total} downloaded"
+            if deleted:
+                status += f", {deleted} deleted"
+            print(f"  {coll_name}: {status}")
+
+    if deleted_videos:
+        print("\n--- Deleted from TikTok ---")
+        for vid in deleted_videos[:10]:
+            vid_id = vid.get("id", "unknown")
+            coll_name = vid.get("collection_name", "unknown")
+            downloaded = "saved" if vid.get("downloaded") else "NOT saved"
+            print(f"  [{coll_name}] {vid_id} - {downloaded}")
+        if len(deleted_videos) > 10:
+            print(f"  ... and {len(deleted_videos) - 10} more")
 
     if store.queue["pending"]:
         print("\n--- Pending Downloads ---")
