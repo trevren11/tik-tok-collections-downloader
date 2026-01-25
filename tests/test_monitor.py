@@ -77,6 +77,24 @@ class TestDataStore(TestCase):
         self.store.add_video("vid123", {"id": "vid123"})
         self.assertIn("cached_at", self.store.videos["vid123"])
 
+    def test_add_video_preserves_download_status(self):
+        """add_video should preserve downloaded status when updating existing video."""
+        # Add video and mark as downloaded
+        self.store.add_video("vid123", {"id": "vid123", "author": "user1"})
+        self.store.videos["vid123"]["downloaded"] = True
+        self.store.videos["vid123"]["download_path"] = "/path/to/video.mp4"
+        self.store.videos["vid123"]["downloaded_at"] = "2024-01-01T12:00:00"
+
+        # Update the same video (simulating a sync)
+        self.store.add_video("vid123", {"id": "vid123", "author": "user1", "desc": "new desc"})
+
+        # Download info should be preserved
+        self.assertTrue(self.store.videos["vid123"]["downloaded"])
+        self.assertEqual(self.store.videos["vid123"]["download_path"], "/path/to/video.mp4")
+        self.assertEqual(self.store.videos["vid123"]["downloaded_at"], "2024-01-01T12:00:00")
+        # New data should also be there
+        self.assertEqual(self.store.videos["vid123"]["desc"], "new desc")
+
     def test_queue_download(self):
         """queue_download should add video to pending queue."""
         result = self.store.queue_download("vid123", {
@@ -434,6 +452,321 @@ class TestDeleteVideo(TestCase):
         self.assertTrue(collection_dir.exists())
         self.assertFalse(video_dir1.exists())
         self.assertTrue(video_dir2.exists())
+
+
+class TestDataJsGeneration(TestCase):
+    """Tests for data.js generation."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_data_js_created_on_init(self):
+        """data.js should be created when DataStore is initialized."""
+        DataStore(self.temp_dir)
+        data_js = Path(self.temp_dir) / "data.js"
+        self.assertTrue(data_js.exists(), "data.js should be created on DataStore init")
+
+    def test_data_js_contains_valid_javascript(self):
+        """data.js should contain valid JavaScript with window variables."""
+        DataStore(self.temp_dir)
+        data_js = Path(self.temp_dir) / "data.js"
+        content = data_js.read_text()
+        self.assertIn("window.collectionsData", content)
+        self.assertIn("window.videosData", content)
+
+    def test_data_js_contains_collections_data(self):
+        """data.js should contain the collections data."""
+        store = DataStore(self.temp_dir)
+        store.update_collection("123", {"id": "123", "name": "Test Collection"})
+        store.save_collections()
+
+        data_js = Path(self.temp_dir) / "data.js"
+        content = data_js.read_text()
+        self.assertIn("Test Collection", content)
+
+    def test_data_js_contains_videos_data(self):
+        """data.js should contain the videos data."""
+        store = DataStore(self.temp_dir)
+        store.add_video("vid123", {"id": "vid123", "author": "testuser"})
+        store.save_videos()
+
+        data_js = Path(self.temp_dir) / "data.js"
+        content = data_js.read_text()
+        self.assertIn("testuser", content)
+
+    def test_data_js_updated_on_save_collections(self):
+        """data.js should be updated when collections are saved."""
+        store = DataStore(self.temp_dir)
+        data_js = Path(self.temp_dir) / "data.js"
+
+        # Get initial modification time
+        initial_content = data_js.read_text()
+
+        # Update and save
+        store.update_collection("456", {"id": "456", "name": "New Collection"})
+        store.save_collections()
+
+        new_content = data_js.read_text()
+        self.assertIn("New Collection", new_content)
+        self.assertNotEqual(initial_content, new_content)
+
+    def test_data_js_updated_on_save_videos(self):
+        """data.js should be updated when videos are saved."""
+        store = DataStore(self.temp_dir)
+        data_js = Path(self.temp_dir) / "data.js"
+
+        initial_content = data_js.read_text()
+
+        store.add_video("newvid", {"id": "newvid", "author": "newauthor"})
+        store.save_videos()
+
+        new_content = data_js.read_text()
+        self.assertIn("newauthor", new_content)
+
+
+class TestViewerHtmlGeneration(TestCase):
+    """Tests for viewer.html generation in DataStore."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_viewer_html_created_on_init(self):
+        """DataStore should copy viewer.html to data directory on init."""
+        DataStore(self.temp_dir)  # Side effect: creates viewer.html
+        viewer_file = Path(self.temp_dir) / "viewer.html"
+        self.assertTrue(viewer_file.exists(), "viewer.html should be created on DataStore init")
+
+    def test_viewer_html_contains_expected_content(self):
+        """Copied viewer.html should contain expected HTML structure."""
+        DataStore(self.temp_dir)  # Side effect: creates viewer.html
+        viewer_file = Path(self.temp_dir) / "viewer.html"
+        content = viewer_file.read_text()
+        self.assertIn("<!DOCTYPE html>", content)
+        self.assertIn("data.js", content)
+
+    def test_viewer_html_matches_source(self):
+        """Copied viewer.html should match the source file."""
+        DataStore(self.temp_dir)  # Side effect: creates viewer.html
+        viewer_file = Path(self.temp_dir) / "viewer.html"
+
+        # Get source file path (same logic as _write_viewer_html)
+        import tiktok_monitor
+        script_dir = Path(tiktok_monitor.__file__).parent
+        viewer_src = script_dir / "viewer.html"
+
+        self.assertEqual(viewer_file.read_text(), viewer_src.read_text())
+
+
+class TestCookieHeader(TestCase):
+    """Tests for cookie header creation in VideoDownloader."""
+
+    def setUp(self):
+        """Create a temporary directory for downloads."""
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_no_cookies_creates_empty_header(self):
+        """VideoDownloader without cookies should have empty cookie header."""
+        downloader = VideoDownloader(self.temp_dir)
+        self.assertEqual(downloader._cookie_header, "")
+
+    def test_single_cookie_header(self):
+        """VideoDownloader with single cookie should create proper header."""
+        cookies = {"sessionid": "test123"}
+        downloader = VideoDownloader(self.temp_dir, cookies=cookies)
+        self.assertEqual(downloader._cookie_header, "sessionid=test123")
+
+    def test_multiple_cookies_header(self):
+        """VideoDownloader with multiple cookies should join them with semicolons."""
+        cookies = {"sessionid": "test123", "ttwid": "abc456"}
+        downloader = VideoDownloader(self.temp_dir, cookies=cookies)
+        # Check both cookies are present (order may vary)
+        self.assertIn("sessionid=test123", downloader._cookie_header)
+        self.assertIn("ttwid=abc456", downloader._cookie_header)
+        self.assertIn("; ", downloader._cookie_header)
+
+    def test_empty_cookie_value_excluded(self):
+        """Cookies with empty values should be excluded from header."""
+        cookies = {"sessionid": "test123", "empty": "", "ttwid": "abc456"}
+        downloader = VideoDownloader(self.temp_dir, cookies=cookies)
+        self.assertNotIn("empty=", downloader._cookie_header)
+        self.assertIn("sessionid=test123", downloader._cookie_header)
+        self.assertIn("ttwid=abc456", downloader._cookie_header)
+
+
+class TestCorruptedJsonHandling(TestCase):
+    """Tests for handling corrupted or empty JSON files."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_empty_videos_json_handled(self):
+        """Empty videos.json should not crash DataStore."""
+        # Create empty videos.json
+        videos_file = Path(self.temp_dir) / "videos.json"
+        videos_file.write_text("")
+
+        # Should not raise exception
+        store = DataStore(self.temp_dir)
+        self.assertEqual(store.videos, {})
+
+    def test_corrupted_videos_json_handled(self):
+        """Corrupted videos.json should not crash DataStore."""
+        videos_file = Path(self.temp_dir) / "videos.json"
+        videos_file.write_text("{ invalid json }")
+
+        store = DataStore(self.temp_dir)
+        self.assertEqual(store.videos, {})
+
+    def test_empty_collections_json_handled(self):
+        """Empty collections.json should not crash DataStore."""
+        collections_file = Path(self.temp_dir) / "collections.json"
+        collections_file.write_text("")
+
+        store = DataStore(self.temp_dir)
+        self.assertEqual(store.collections, {})
+
+    def test_empty_queue_json_handled(self):
+        """Empty download_queue.json should not crash DataStore."""
+        queue_file = Path(self.temp_dir) / "download_queue.json"
+        queue_file.write_text("")
+
+        store = DataStore(self.temp_dir)
+        self.assertEqual(store.queue, {"pending": [], "completed": [], "failed": []})
+
+
+class TestPreventDuplicateDownloads(TestCase):
+    """Tests to ensure videos are not re-downloaded."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.store = DataStore(self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_queue_skips_already_downloaded_video(self):
+        """queue_download should skip videos marked as downloaded."""
+        # Add video and mark as downloaded
+        self.store.add_video("vid123", {"id": "vid123", "downloaded": True})
+        self.store.videos["vid123"]["downloaded"] = True
+
+        # Try to queue - should return False
+        result = self.store.queue_download("vid123", {
+            "url": "https://tiktok.com/video/123",
+            "collection_name": "Test",
+        })
+
+        self.assertFalse(result, "Should not queue already downloaded video")
+        self.assertEqual(len(self.store.queue["pending"]), 0)
+
+    def test_queue_skips_video_with_file_on_disk(self):
+        """queue_download should skip videos that have files on disk."""
+        # Create video file on disk
+        video_dir = Path(self.temp_dir) / "TestCollection" / "vid123"
+        video_dir.mkdir(parents=True)
+        (video_dir / "vid123.mp4").touch()
+
+        # Add video to store (not marked as downloaded)
+        self.store.add_video("vid123", {"id": "vid123"})
+
+        # Try to queue - should return False because file exists
+        result = self.store.queue_download("vid123", {
+            "url": "https://tiktok.com/video/123",
+            "collection_name": "TestCollection",
+        })
+
+        self.assertFalse(result, "Should not queue video with existing file on disk")
+        self.assertEqual(len(self.store.queue["pending"]), 0)
+
+    def test_queue_auto_marks_downloaded_when_file_exists(self):
+        """queue_download should mark video as downloaded if file exists on disk."""
+        # Create video file on disk
+        video_dir = Path(self.temp_dir) / "TestCollection" / "vid123"
+        video_dir.mkdir(parents=True)
+        video_file = video_dir / "vid123.mp4"
+        video_file.touch()
+
+        # Add video to store (not marked as downloaded)
+        self.store.add_video("vid123", {"id": "vid123"})
+
+        # Try to queue
+        self.store.queue_download("vid123", {
+            "url": "https://tiktok.com/video/123",
+            "collection_name": "TestCollection",
+        })
+
+        # Should now be marked as downloaded
+        self.assertTrue(self.store.videos["vid123"].get("downloaded"))
+        self.assertEqual(self.store.videos["vid123"]["download_path"], str(video_file))
+
+    def test_queue_auto_adds_to_completed_when_file_exists(self):
+        """queue_download should add to completed list if file exists on disk."""
+        # Create video file on disk
+        video_dir = Path(self.temp_dir) / "TestCollection" / "vid123"
+        video_dir.mkdir(parents=True)
+        (video_dir / "vid123.mp4").touch()
+
+        # Add video to store
+        self.store.add_video("vid123", {"id": "vid123"})
+
+        # Try to queue
+        self.store.queue_download("vid123", {
+            "url": "https://tiktok.com/video/123",
+            "collection_name": "TestCollection",
+        })
+
+        # Should be in completed list
+        self.assertIn("vid123", self.store.queue["completed"])
+
+    def test_queue_allows_new_video_without_file(self):
+        """queue_download should allow queueing new videos without existing files."""
+        self.store.add_video("vid123", {"id": "vid123"})
+
+        result = self.store.queue_download("vid123", {
+            "url": "https://tiktok.com/video/123",
+            "collection_name": "TestCollection",
+        })
+
+        self.assertTrue(result, "Should queue new video without existing file")
+        self.assertEqual(len(self.store.queue["pending"]), 1)
+
+    def test_sanitized_collection_name_matches_disk(self):
+        """queue_download should find files even with special chars in collection name."""
+        # Create video file with sanitized collection name
+        video_dir = Path(self.temp_dir) / "Test_Collection" / "vid123"
+        video_dir.mkdir(parents=True)
+        (video_dir / "vid123.mp4").touch()
+
+        self.store.add_video("vid123", {"id": "vid123"})
+
+        # Queue with unsanitized name - should still find the file
+        result = self.store.queue_download("vid123", {
+            "url": "https://tiktok.com/video/123",
+            "collection_name": "Test/Collection",  # Has special char
+        })
+
+        self.assertFalse(result, "Should find file with sanitized collection name")
 
 
 if __name__ == "__main__":

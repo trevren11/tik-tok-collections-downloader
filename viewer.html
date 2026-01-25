@@ -404,6 +404,34 @@
             color: #888;
         }
 
+        /* Load more pagination */
+        .load-more-container {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 30px 20px;
+            gap: 10px;
+        }
+        .load-more-btn {
+            background: #fe2c55;
+            border: none;
+            color: #fff;
+            padding: 12px 32px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .load-more-btn:hover {
+            background: #e02850;
+        }
+        .video-count {
+            color: #888;
+            font-size: 13px;
+        }
+
         /* Mobile responsive */
         @media (max-width: 768px) {
             body { flex-direction: column; }
@@ -478,6 +506,7 @@
     <script src="data.js"></script>
     <script>
         // Data is loaded from data.js as window.collectionsData and window.videosData
+        const VIDEOS_PER_PAGE = 50;
         let collectionsList = [];
         let videosList = [];
         let currentCollection = null;
@@ -486,6 +515,7 @@
         let currentView = 'medium';
         let searchQuery = '';
         let filteredVideos = [];
+        let displayedCount = VIDEOS_PER_PAGE;
 
         function init() {
             // Check if data was loaded
@@ -497,21 +527,23 @@
                 return;
             }
 
-            // Process collections - use TikTok's reported total and disk counts
-            const diskCounts = window.diskCounts || {};
+            // Process collections - count downloads from videos data
             collectionsList = [];
             for (const [collId, coll] of Object.entries(window.collectionsData)) {
                 const collName = coll.name || 'Unknown';
-                // Sanitize name to match folder name on disk
-                const safeName = collName.replace(/[^a-zA-Z0-9 \-_]/g, '_');
-                // Use disk count for downloaded, TikTok's reported total for total
-                const downloaded = diskCounts[safeName] || 0;
+                // Count downloaded videos for this collection from videos data
+                let downloadedCount = 0;
+                for (const vid of Object.values(window.videosData)) {
+                    if (vid.collection_id === collId && vid.downloaded) {
+                        downloadedCount++;
+                    }
+                }
                 const total = parseInt(coll.total) || 0;
                 collectionsList.push({
                     id: collId,
                     name: collName,
                     total: total,  // TikTok's reported total
-                    downloaded: downloaded,  // Actual files on disk
+                    downloaded: downloadedCount,  // Count from videos data
                 });
             }
             collectionsList.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
@@ -536,10 +568,24 @@
             }
             videosList.sort((a, b) => (b.create_time || 0) - (a.create_time || 0));
 
+            // Load state from URL hash before rendering
+            loadFromUrlHash();
+
             renderStatus();
             renderCollections();
             renderVideos();
             setupEventListeners();
+
+            // Apply view from URL hash after setup
+            setView(currentView, false);
+
+            // Listen for hash changes (back/forward navigation)
+            window.addEventListener('hashchange', () => {
+                loadFromUrlHash();
+                renderCollections();
+                renderVideos();
+                setView(currentView, false);
+            });
         }
 
         function getVideoPath(video) {
@@ -553,9 +599,8 @@
         }
 
         function renderStatus() {
-            // Use disk counts for accurate downloaded number
-            const diskCounts = window.diskCounts || {};
-            const downloaded = diskCounts._total || 0;
+            // Count downloads from videos data
+            const downloaded = videosList.filter(v => v.downloaded).length;
             const totalFromTikTok = collectionsList.reduce((sum, c) => sum + c.total, 0);
             const deleted = videosList.filter(v => v.deleted_from_tiktok).length;
 
@@ -568,8 +613,7 @@
 
         function renderCollections() {
             const container = document.getElementById('collections');
-            const diskCounts = window.diskCounts || {};
-            const totalDownloaded = diskCounts._total || 0;
+            const totalDownloaded = collectionsList.reduce((sum, c) => sum + c.downloaded, 0);
             const totalFromTikTok = collectionsList.reduce((sum, c) => sum + c.total, 0);
 
             let html = `
@@ -599,40 +643,54 @@
         function renderVideos() {
             const container = document.getElementById('videos');
 
-            filteredVideos = videosList.slice();
-
+            // Update header
             if (currentCollection) {
-                filteredVideos = filteredVideos.filter(v => v.collection_id === currentCollection);
                 const coll = collectionsList.find(c => c.id === currentCollection);
                 document.getElementById('current-collection').textContent = coll ? coll.name : 'Videos';
             } else {
                 document.getElementById('current-collection').textContent = 'All Videos';
             }
 
-            if (currentFilter === 'downloaded') {
-                filteredVideos = filteredVideos.filter(v => v.downloaded);
-            } else if (currentFilter === 'pending') {
-                filteredVideos = filteredVideos.filter(v => !v.downloaded && !v.deleted_from_tiktok);
-            } else if (currentFilter === 'deleted') {
-                filteredVideos = filteredVideos.filter(v => v.deleted_from_tiktok);
+            // Build filter function once (avoids creating multiple array copies)
+            const query = searchQuery ? searchQuery.toLowerCase() : null;
+            const matchesFilter = (v) => {
+                if (currentCollection && v.collection_id !== currentCollection) return false;
+                if (currentFilter === 'downloaded' && !v.downloaded) return false;
+                if (currentFilter === 'pending' && (v.downloaded || v.deleted_from_tiktok)) return false;
+                if (currentFilter === 'deleted' && !v.deleted_from_tiktok) return false;
+                if (query) {
+                    const desc = (v.desc || '').toLowerCase();
+                    const author = (v.author || '').toLowerCase();
+                    const collName = (v.collection_name || '').toLowerCase();
+                    if (!desc.includes(query) && !author.includes(query) && !collName.includes(query)) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+
+            // Single pass: collect videos up to displayedCount + 1, count total matches
+            filteredVideos = [];
+            let totalMatches = 0;
+            for (const video of videosList) {
+                if (matchesFilter(video)) {
+                    totalMatches++;
+                    if (filteredVideos.length < displayedCount) {
+                        filteredVideos.push(video);
+                    }
+                }
             }
 
-            if (searchQuery) {
-                const query = searchQuery.toLowerCase();
-                filteredVideos = filteredVideos.filter(v =>
-                    (v.desc || '').toLowerCase().includes(query) ||
-                    (v.author || '').toLowerCase().includes(query) ||
-                    (v.collection_name || '').toLowerCase().includes(query)
-                );
-            }
-
-            if (filteredVideos.length === 0) {
+            if (totalMatches === 0) {
                 container.innerHTML = '<div class="empty-state">No videos found</div>';
                 return;
             }
 
+            const videosToShow = filteredVideos;
+            const hasMore = totalMatches > displayedCount;
+
             let html = '';
-            filteredVideos.forEach((video, index) => {
+            videosToShow.forEach((video, index) => {
                 const classes = ['video-card'];
                 if (!video.downloaded) classes.push('not-downloaded');
                 if (video.deleted_from_tiktok) classes.push('deleted');
@@ -657,6 +715,25 @@
                 `;
             });
 
+            // Add load more button if there are more videos
+            if (hasMore) {
+                const remaining = totalMatches - displayedCount;
+                html += `
+                    <div class="load-more-container">
+                        <button class="load-more-btn" onclick="loadMore()">
+                            Load More (${remaining} remaining)
+                        </button>
+                        <div class="video-count">Showing ${displayedCount} of ${totalMatches}</div>
+                    </div>
+                `;
+            } else if (totalMatches > VIDEOS_PER_PAGE) {
+                html += `
+                    <div class="load-more-container">
+                        <div class="video-count">Showing all ${totalMatches} videos</div>
+                    </div>
+                `;
+            }
+
             container.innerHTML = html;
 
             container.querySelectorAll('.video-card').forEach(card => {
@@ -664,16 +741,83 @@
             });
         }
 
-        function selectCollection(id) {
+        function selectCollection(id, updateHash = true) {
             currentCollection = id;
+            displayedCount = VIDEOS_PER_PAGE; // Reset pagination
+            if (updateHash) {
+                updateUrlHash();
+            }
             renderCollections();
             renderVideos();
         }
 
-        function setFilter(filter) {
+        function loadMore() {
+            displayedCount += VIDEOS_PER_PAGE;
+            renderVideos();
+            // Scroll to show new content (optional smooth scroll)
+        }
+
+        function updateUrlHash() {
+            const params = new URLSearchParams();
+            if (currentCollection) {
+                params.set('collection', currentCollection);
+            }
+            if (currentFilter && currentFilter !== 'all') {
+                params.set('filter', currentFilter);
+            }
+            if (currentView && currentView !== 'medium') {
+                params.set('view', currentView);
+            }
+            const hash = params.toString();
+            window.location.hash = hash ? hash : '';
+        }
+
+        function loadFromUrlHash() {
+            const hash = window.location.hash.slice(1);
+            displayedCount = VIDEOS_PER_PAGE; // Reset pagination
+            if (!hash) {
+                currentCollection = null;
+                currentFilter = 'all';
+                currentView = 'medium';
+                return;
+            }
+
+            const params = new URLSearchParams(hash);
+
+            const collectionId = params.get('collection');
+            if (collectionId && window.collectionsData && window.collectionsData[collectionId]) {
+                currentCollection = collectionId;
+            } else {
+                currentCollection = null;
+            }
+
+            const filter = params.get('filter');
+            if (filter && ['all', 'downloaded', 'pending', 'deleted'].includes(filter)) {
+                currentFilter = filter;
+            } else {
+                currentFilter = 'all';
+            }
+
+            const view = params.get('view');
+            if (view && ['list', 'small', 'medium', 'large'].includes(view)) {
+                currentView = view;
+            } else {
+                currentView = 'medium';
+            }
+
+            // Update filter buttons UI
+            document.querySelectorAll('.filter-buttons button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`filter-${currentFilter}`).classList.add('active');
+        }
+
+        function setFilter(filter, updateHash = true) {
             currentFilter = filter;
+            displayedCount = VIDEOS_PER_PAGE; // Reset pagination
             document.querySelectorAll('.filter-buttons button').forEach(b => b.classList.remove('active'));
             document.getElementById(`filter-${filter}`).classList.add('active');
+            if (updateHash) {
+                updateUrlHash();
+            }
             renderVideos();
         }
 
@@ -762,7 +906,7 @@
             return num.toString();
         }
 
-        function setView(view) {
+        function setView(view, updateHash = true) {
             currentView = view;
             const grid = document.getElementById('videos');
             grid.classList.remove('view-list', 'view-small', 'view-large');
@@ -771,6 +915,9 @@
             }
             document.querySelectorAll('.view-buttons button').forEach(b => b.classList.remove('active'));
             document.getElementById('view-' + view).classList.add('active');
+            if (updateHash) {
+                updateUrlHash();
+            }
         }
 
         function setupEventListeners() {
@@ -789,6 +936,7 @@
                 clearTimeout(searchTimeout);
                 searchTimeout = setTimeout(() => {
                     searchQuery = e.target.value;
+                    displayedCount = VIDEOS_PER_PAGE; // Reset pagination on search
                     renderVideos();
                 }, 300);
             };
