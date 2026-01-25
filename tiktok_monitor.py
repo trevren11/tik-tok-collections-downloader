@@ -1186,18 +1186,20 @@ def main():
     logger.info("-" * 40)
 
     config = load_config()
-    sessionid = config.get("cookies", {}).get("sessionid", "")
+
+    # Environment variables override config (useful for Docker/Unraid)
+    sessionid = os.environ.get("TIKTOK_SESSION_ID") or config.get("cookies", {}).get("sessionid", "")
     if not sessionid:
-        logger.error("No sessionid found in config.json")
+        logger.error("No sessionid found in TIKTOK_SESSION_ID env var or config.json")
         sys.exit(1)
 
-    # Environment variable overrides config (useful for Docker)
     download_dir = os.environ.get("DOWNLOAD_DIR") or config.get("download_dir", "./downloads")
 
     # Initialize
     client = TikTokClient(sessionid)
     store = DataStore(download_dir)
-    cookies = config.get("cookies", {})
+    cookies = config.get("cookies", {}).copy()
+    cookies["sessionid"] = sessionid  # Ensure env var override is used
     downloader = VideoDownloader(download_dir, cookies)
 
     logger.info(f"Data/Download dir: {download_dir}")

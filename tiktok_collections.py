@@ -6,6 +6,7 @@ Fetches your TikTok collections/favorites using browser automation.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -113,11 +114,12 @@ def main():
     print("-" * 40)
 
     config = load_config()
-    cookies = config.get("cookies", {})
-    sessionid = cookies.get("sessionid", "")
+
+    # Environment variable overrides config (useful for Docker/Unraid)
+    sessionid = os.environ.get("TIKTOK_SESSION_ID") or config.get("cookies", {}).get("sessionid", "")
 
     if not sessionid:
-        print("Error: No sessionid found in config.")
+        print("Error: No sessionid found in TIKTOK_SESSION_ID env var or config.json")
         sys.exit(1)
 
     try:
