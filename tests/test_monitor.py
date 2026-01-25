@@ -1039,6 +1039,103 @@ class TestLoadConfigWithExcludeCollections(TestCase):
         self.assertEqual(config["exclude_collections"], [])
 
 
+class TestWatchModeStartupDownload(TestCase):
+    """Tests for watch mode resuming downloads on startup."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_pending_queue_available_on_restart(self):
+        """Pending downloads should be available when DataStore is reloaded."""
+        # First instance - add items to pending queue
+        store1 = DataStore(self.temp_dir)
+        store1.add_video("vid1", {"id": "vid1", "author": "user1"})
+        store1.add_video("vid2", {"id": "vid2", "author": "user2"})
+        store1.queue_download("vid1", {"url": "test1", "collection_name": "C1", "author": "user1"})
+        store1.queue_download("vid2", {"url": "test2", "collection_name": "C2", "author": "user2"})
+        store1.save_queue()
+        store1.save_videos()
+
+        # Second instance - simulate container restart
+        store2 = DataStore(self.temp_dir)
+
+        # Pending queue should have items ready to download
+        self.assertEqual(len(store2.queue["pending"]), 2)
+        pending_ids = [item["id"] for item in store2.queue["pending"]]
+        self.assertIn("vid1", pending_ids)
+        self.assertIn("vid2", pending_ids)
+
+    def test_partial_download_resumes(self):
+        """Downloads should resume from where they left off after restart."""
+        # First instance - add 3 items, complete 1
+        store1 = DataStore(self.temp_dir)
+        store1.add_video("vid1", {"id": "vid1"})
+        store1.add_video("vid2", {"id": "vid2"})
+        store1.add_video("vid3", {"id": "vid3"})
+        store1.queue_download("vid1", {"url": "t1", "collection_name": "C"})
+        store1.queue_download("vid2", {"url": "t2", "collection_name": "C"})
+        store1.queue_download("vid3", {"url": "t3", "collection_name": "C"})
+
+        # Complete vid1
+        store1.mark_downloaded("vid1", "/path/vid1.mp4")
+        store1.save_queue()
+        store1.save_videos()
+
+        # Second instance - should have 2 pending, 1 completed
+        store2 = DataStore(self.temp_dir)
+        self.assertEqual(len(store2.queue["pending"]), 2)
+        self.assertEqual(len(store2.queue["completed"]), 1)
+        self.assertIn("vid1", store2.queue["completed"])
+
+    def test_failed_downloads_not_in_pending(self):
+        """Failed downloads should not be in pending queue on restart."""
+        store1 = DataStore(self.temp_dir)
+        store1.add_video("vid1", {"id": "vid1"})
+        store1.add_video("vid2", {"id": "vid2"})
+        store1.queue_download("vid1", {"url": "t1", "collection_name": "C"})
+        store1.queue_download("vid2", {"url": "t2", "collection_name": "C"})
+
+        # Fail vid1
+        store1.mark_failed("vid1", "Network error")
+        store1.save_queue()
+
+        # Restart
+        store2 = DataStore(self.temp_dir)
+        self.assertEqual(len(store2.queue["pending"]), 1)
+        self.assertEqual(len(store2.queue["failed"]), 1)
+        pending_ids = [item["id"] for item in store2.queue["pending"]]
+        self.assertNotIn("vid1", pending_ids)
+        self.assertIn("vid2", pending_ids)
+
+    def test_queue_file_contains_all_data(self):
+        """The queue file should contain all necessary data for resuming."""
+        store1 = DataStore(self.temp_dir)
+        store1.queue_download("vid1", {
+            "url": "https://tiktok.com/video/123",
+            "collection_name": "Test Collection",
+            "author": "testuser",
+            "desc": "Test description"
+        })
+        store1.save_queue()
+
+        # Check the file directly
+        queue_file = Path(self.temp_dir) / "download_queue.json"
+        with open(queue_file) as f:
+            data = json.load(f)
+
+        self.assertEqual(len(data["pending"]), 1)
+        item = data["pending"][0]
+        self.assertEqual(item["id"], "vid1")
+        self.assertEqual(item["url"], "https://tiktok.com/video/123")
+        self.assertEqual(item["collection"], "Test Collection")
+        self.assertEqual(item["author"], "testuser")
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

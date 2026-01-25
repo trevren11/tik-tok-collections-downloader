@@ -488,8 +488,12 @@ class TikTokClient:
 
         return collections
 
-    def get_collection_videos(self, collection_id: str, collection_name: str, limit: Optional[int] = None) -> list:
-        """Fetch videos in a collection."""
+    def get_collection_videos(self, collection_id: str, collection_name: str, limit: Optional[int] = None, quick_check: bool = False) -> list:
+        """Fetch videos in a collection.
+
+        Args:
+            quick_check: If True, only fetch first ~30 videos (for checking if new content exists)
+        """
         videos = []
         seen_ids = set()
 
@@ -531,37 +535,41 @@ class TikTokClient:
             except Exception as e:
                 logger.warning(f"  [{collection_name}] Navigation issue: {e}")
 
-            # Scroll to load ALL videos - keep going until we hit the true bottom
+            # Scroll to load videos - quick_check only does minimal scrolling
             scroll_count = 0
-            max_scrolls = 500  # Enough for ~10,000+ videos
+            max_scrolls = 3 if quick_check else 500  # quick_check: ~30 videos, full: ~10,000+
             last_height = 0
 
-            while scroll_count < max_scrolls:
-                prev_count = len(videos)
+            try:
+                while scroll_count < max_scrolls:
+                    prev_count = len(videos)
 
-                # Scroll to bottom
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(2000)
-                scroll_count += 1
-
-                # Check if page height changed (true indicator of more content)
-                current_height = page.evaluate("document.body.scrollHeight")
-
-                if len(videos) == prev_count and current_height == last_height:
-                    # No new videos AND page didn't grow - try a few more times
-                    page.wait_for_timeout(1000)
+                    # Scroll to bottom
                     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                     page.wait_for_timeout(2000)
-                    final_height = page.evaluate("document.body.scrollHeight")
+                    scroll_count += 1
 
-                    if final_height == current_height and len(videos) == prev_count:
-                        logger.info(f"    [{collection_name}] Reached bottom at {len(videos)} videos")
+                    # Check if page height changed (true indicator of more content)
+                    current_height = page.evaluate("document.body.scrollHeight")
+
+                    if len(videos) == prev_count and current_height == last_height:
+                        # No new videos AND page didn't grow - try a few more times
+                        page.wait_for_timeout(1000)
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        page.wait_for_timeout(2000)
+                        final_height = page.evaluate("document.body.scrollHeight")
+
+                        if final_height == current_height and len(videos) == prev_count:
+                            logger.info(f"    [{collection_name}] Reached bottom at {len(videos)} videos")
+                            break
+
+                    last_height = current_height
+
+                    if limit and len(videos) >= limit:
                         break
-
-                last_height = current_height
-
-                if limit and len(videos) >= limit:
-                    break
+            except Exception as e:
+                # Keep whatever videos we captured even if scrolling fails
+                logger.warning(f"    [{collection_name}] Scrolling error (keeping {len(videos)} videos): {e}")
 
             browser.close()
 
@@ -620,16 +628,20 @@ class TikTokClient:
             scroll_count = 0
             max_scrolls = 50 if not limit else (limit // 30) + 2
 
-            while scroll_count < max_scrolls:
-                prev_count = len(videos)
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(1500)
-                scroll_count += 1
+            try:
+                while scroll_count < max_scrolls:
+                    prev_count = len(videos)
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(1500)
+                    scroll_count += 1
 
-                if len(videos) == prev_count:
-                    break
-                if limit and len(videos) >= limit:
-                    break
+                    if len(videos) == prev_count:
+                        break
+                    if limit and len(videos) >= limit:
+                        break
+            except Exception as e:
+                # Keep whatever videos we captured even if scrolling fails
+                logger.warning(f"    [Favorites] Scrolling error (keeping {len(videos)} videos): {e}")
 
             browser.close()
 
@@ -874,10 +886,32 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
     for i, coll in enumerate(collections_to_process, 1):
         coll_id = coll["id"]
         coll_name = coll["name"]
-        logger.info(f"  [{i}/{len(collections_to_process)}] Fetching: {coll_name}")
+
+        # Check if this collection has been synced before
+        existing_videos = [v for v in store.videos.values() if v.get("collection_id") == coll_id]
+        has_been_synced = len(existing_videos) > 0
 
         try:
-            videos = client.get_collection_videos(coll_id, coll_name, limit=video_limit)
+            if has_been_synced:
+                # Quick check: only fetch first ~30 videos to see if there's new content
+                logger.info(f"  [{i}/{len(collections_to_process)}] Quick check: {coll_name}")
+                preview_videos = client.get_collection_videos(coll_id, coll_name, quick_check=True)
+
+                # Check if any preview videos are new
+                existing_ids = set(store.videos.keys())
+                new_in_preview = [v for v in preview_videos if v.get("id") not in existing_ids]
+
+                if not new_in_preview:
+                    logger.info(f"  [{i}/{len(collections_to_process)}] {coll_name}: No new videos in recent {len(preview_videos)}, skipping full sync")
+                    continue
+                else:
+                    logger.info(f"  [{i}/{len(collections_to_process)}] {coll_name}: Found {len(new_in_preview)} new in preview, doing full sync...")
+                    videos = client.get_collection_videos(coll_id, coll_name, limit=video_limit)
+            else:
+                # First time syncing this collection - fetch all
+                logger.info(f"  [{i}/{len(collections_to_process)}] Fetching: {coll_name}")
+                videos = client.get_collection_videos(coll_id, coll_name, limit=video_limit)
+
             logger.info(f"  [{i}/{len(collections_to_process)}] {coll_name}: Found {len(videos)} videos")
         except Exception as e:
             logger.error(f"  [{i}/{len(collections_to_process)}] Error fetching {coll_name}: {e}")
@@ -1029,21 +1063,29 @@ def cmd_download(store: DataStore, downloader: VideoDownloader, limit: Optional[
     logger.info(f"Remaining in queue: {len(store.get_pending_downloads())}")
 
 
-def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloader, interval: int, exclude_collections: Optional[list] = None):
+def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloader, interval: int, exclude_collections: Optional[list] = None, download_limit: Optional[int] = None, collection_limit: Optional[int] = None, video_limit: Optional[int] = None):
     """Watch mode: periodic sync + download."""
     logger.info(f"=== WATCH MODE (every {interval} minutes) ===")
     logger.info("Press Ctrl+C to stop")
     logger.info(f"Current status: {len(store.videos)} videos tracked, {len(store.queue['pending'])} pending")
+
+    # On startup, immediately process any pending downloads from previous runs
+    # This allows resuming downloads without waiting for a full sync
+    pending_count = len(store.queue['pending'])
+    if pending_count > 0:
+        logger.info(f"=== RESUMING {pending_count} PENDING DOWNLOADS ===")
+        cmd_download(store, downloader, limit=download_limit)
+        logger.info("=== RESUME COMPLETE ===")
 
     while True:
         try:
             logger.info("Starting sync cycle...")
 
             # Sync and download - downloads happen after each collection
-            cmd_sync(client, store, downloader=downloader, exclude_collections=exclude_collections)
+            cmd_sync(client, store, collection_limit=collection_limit, video_limit=video_limit, downloader=downloader, exclude_collections=exclude_collections)
 
             # Process any remaining downloads (e.g., from previous failed attempts)
-            cmd_download(store, downloader)
+            cmd_download(store, downloader, limit=download_limit)
 
             logger.info(f"Next check in {interval} minutes...")
             time.sleep(interval * 60)
@@ -1210,6 +1252,11 @@ def main():
     download_dir = os.environ.get("DOWNLOAD_DIR") or config.get("download_dir", "./downloads")
     exclude_collections = config.get("exclude_collections", [])
 
+    # Limit environment variables (useful for testing in Docker/Unraid)
+    env_download_limit = os.environ.get("DOWNLOAD_LIMIT")
+    env_collection_limit = os.environ.get("COLLECTION_LIMIT")
+    env_video_limit = os.environ.get("VIDEO_LIMIT")
+
     # Initialize
     client = TikTokClient(sessionid)
     store = DataStore(download_dir)
@@ -1218,20 +1265,28 @@ def main():
 
     logger.info(f"Data/Download dir: {download_dir}")
 
+    # Environment variables override command line args (useful for Docker/Unraid testing)
+    download_limit = int(env_download_limit) if env_download_limit else args.limit
+    collection_limit = int(env_collection_limit) if env_collection_limit else args.collection_limit
+    video_limit = int(env_video_limit) if env_video_limit else args.video_limit
+
+    if download_limit:
+        logger.info(f"Download limit: {download_limit} videos per run")
+
     if args.status:
         cmd_status(store)
     elif args.delete or args.delete_all:
         cmd_delete(store, args.delete or [], args.delete_all)
     elif args.sync:
-        cmd_sync(client, store, args.collection_limit, args.video_limit, exclude_collections=exclude_collections)
+        cmd_sync(client, store, collection_limit, video_limit, exclude_collections=exclude_collections)
     elif args.download:
-        cmd_download(store, downloader, args.limit)
+        cmd_download(store, downloader, download_limit)
     elif args.watch:
-        cmd_watch(client, store, downloader, args.interval, exclude_collections=exclude_collections)
+        cmd_watch(client, store, downloader, args.interval, exclude_collections=exclude_collections, download_limit=download_limit, collection_limit=collection_limit, video_limit=video_limit)
     else:
         # Default: sync then download
-        cmd_sync(client, store, args.collection_limit, args.video_limit, exclude_collections=exclude_collections)
-        cmd_download(store, downloader, args.limit)
+        cmd_sync(client, store, collection_limit, video_limit, exclude_collections=exclude_collections)
+        cmd_download(store, downloader, download_limit)
 
 
 if __name__ == "__main__":

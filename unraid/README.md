@@ -66,6 +66,10 @@ To publish publicly:
 | Downloads Directory | Where videos are saved |
 | TikTok Session ID | Your `sessionid` cookie from TikTok (alternative to config.json) |
 | Sync Interval | Minutes between sync checks (default: 120) |
+| Download Limit | Limit downloads per sync cycle (e.g., set to 5 for testing, leave empty for unlimited) |
+| Enable Viewer | Set to `true` to enable the web viewer for browsing downloaded videos |
+| Viewer Port | Port for the web viewer (default: 8425). Change this if port 8425 is already in use |
+| Viewer Web Port | The host port mapping - should match Viewer Port value |
 
 ## Getting Your TikTok Session ID
 
