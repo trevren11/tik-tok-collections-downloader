@@ -112,6 +112,41 @@ class DataStore:
                 break
         self.queue["pending"] = [v for v in self.queue["pending"] if v["id"] != video_id]
 
+    def delete_video(self, video_id: str) -> Optional[str]:
+        """
+        Delete a video from tracking and remove its files.
+
+        Returns the deleted file path if files were removed, None otherwise.
+        """
+        import shutil
+
+        deleted_path = None
+
+        # Get video info before removing
+        video = self.videos.get(video_id)
+        if video:
+            download_path = video.get("download_path")
+            if download_path:
+                video_dir = Path(download_path).parent
+                if video_dir.exists():
+                    shutil.rmtree(video_dir)
+                    deleted_path = str(video_dir)
+
+            # Remove from videos
+            del self.videos[video_id]
+
+        # Remove from queue lists
+        self.queue["pending"] = [v for v in self.queue["pending"] if v["id"] != video_id]
+        self.queue["failed"] = [v for v in self.queue["failed"] if v["id"] != video_id]
+        if video_id in self.queue["completed"]:
+            self.queue["completed"].remove(video_id)
+
+        return deleted_path
+
+    def get_downloaded_videos(self) -> list:
+        """Get list of all downloaded video IDs."""
+        return [vid for vid, data in self.videos.items() if data.get("downloaded")]
+
 
 class TikTokClient:
     """Client for fetching TikTok data via browser automation."""
@@ -402,6 +437,36 @@ def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloade
             time.sleep(interval * 60)
 
 
+def cmd_delete(store: DataStore, video_ids: list, delete_all: bool = False):
+    """Delete videos and their files."""
+    print("\n=== DELETE MODE ===")
+
+    if delete_all:
+        video_ids = store.get_downloaded_videos()
+        if not video_ids:
+            print("No downloaded videos to delete.")
+            return
+        print(f"Deleting all {len(video_ids)} downloaded videos...")
+    elif not video_ids:
+        print("No video IDs specified. Use --delete <id> or --delete-all")
+        return
+
+    deleted = 0
+    for vid_id in video_ids:
+        path = store.delete_video(vid_id)
+        if path:
+            print(f"  Deleted: {vid_id} ({path})")
+            deleted += 1
+        else:
+            print(f"  Removed from tracking: {vid_id}")
+
+    store.save_videos()
+    store.save_queue()
+
+    print(f"\n=== DELETE COMPLETE ===")
+    print(f"Deleted {deleted} video(s) and files")
+
+
 def cmd_status(store: DataStore):
     """Show current status."""
     print("\n=== STATUS ===")
@@ -448,6 +513,8 @@ def main():
     parser.add_argument("--limit", "-l", type=int, help="Limit downloads per run")
     parser.add_argument("--collection-limit", type=int, help="Limit collections to sync")
     parser.add_argument("--video-limit", type=int, help="Limit videos per collection")
+    parser.add_argument("--delete", nargs="+", metavar="VIDEO_ID", help="Delete specific video(s) by ID")
+    parser.add_argument("--delete-all", action="store_true", help="Delete all downloaded videos")
     args = parser.parse_args()
 
     print("TikTok Collections Monitor")
@@ -470,6 +537,8 @@ def main():
 
     if args.status:
         cmd_status(store)
+    elif args.delete or args.delete_all:
+        cmd_delete(store, args.delete or [], args.delete_all)
     elif args.sync:
         cmd_sync(client, store, args.collection_limit, args.video_limit)
     elif args.download:

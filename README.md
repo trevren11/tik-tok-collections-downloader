@@ -99,6 +99,8 @@ python tiktok_monitor.py --status
 | `--limit, -l` | Limit downloads per run |
 | `--collection-limit` | Limit collections to sync |
 | `--video-limit` | Limit videos per collection |
+| `--delete VIDEO_ID` | Delete specific video(s) by ID |
+| `--delete-all` | Delete all downloaded videos |
 
 #### Examples
 
@@ -111,6 +113,15 @@ python tiktok_monitor.py --sync --collection-limit 2 --video-limit 50
 
 # Monitor every 30 minutes
 python tiktok_monitor.py --watch -i 30
+
+# Delete a specific video
+python tiktok_monitor.py --delete 7597399138594065687
+
+# Delete multiple videos
+python tiktok_monitor.py --delete 7597399138594065687 7596230214078991638
+
+# Delete all downloaded videos
+python tiktok_monitor.py --delete-all
 ```
 
 ### Web Viewer

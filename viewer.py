@@ -53,6 +53,23 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         else:
             super().do_GET()
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/api/delete":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(body) if body else {}
+            video_id = data.get("video_id")
+            if video_id:
+                result = self.delete_video(video_id)
+                self.send_json(result)
+            else:
+                self.send_json({"success": False, "error": "No video_id provided"})
+        else:
+            self.send_error(404, "Not found")
+
     def send_json(self, data):
         content = json.dumps(data).encode("utf-8")
         self.send_response(200)
@@ -146,6 +163,52 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             "completed": len(queue.get("completed", [])),
             "failed": len(queue.get("failed", [])),
         }
+
+    def delete_video(self, video_id: str) -> dict:
+        """Delete a video and its files."""
+        import shutil
+
+        videos_file = Path(self.data_dir) / "videos.json"
+        queue_file = Path(self.data_dir) / "download_queue.json"
+
+        if not videos_file.exists():
+            return {"success": False, "error": "No videos found"}
+
+        with open(videos_file) as f:
+            videos = json.load(f)
+
+        if video_id not in videos:
+            return {"success": False, "error": "Video not found"}
+
+        # Get video info and delete files
+        video = videos[video_id]
+        deleted_path = None
+        download_path = video.get("download_path")
+        if download_path:
+            video_dir = Path(download_path).parent
+            if video_dir.exists():
+                shutil.rmtree(video_dir)
+                deleted_path = str(video_dir)
+
+        # Remove from videos
+        del videos[video_id]
+        with open(videos_file, "w") as f:
+            json.dump(videos, f, indent=2)
+
+        # Update queue
+        if queue_file.exists():
+            with open(queue_file) as f:
+                queue = json.load(f)
+
+            queue["pending"] = [v for v in queue.get("pending", []) if v["id"] != video_id]
+            queue["failed"] = [v for v in queue.get("failed", []) if v["id"] != video_id]
+            if video_id in queue.get("completed", []):
+                queue["completed"].remove(video_id)
+
+            with open(queue_file, "w") as f:
+                json.dump(queue, f, indent=2)
+
+        return {"success": True, "deleted_path": deleted_path}
 
     def serve_video(self, video_path: str):
         """Serve a video file from the download directory."""
@@ -428,6 +491,20 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             text-decoration: none;
             margin-top: 20px;
         }
+        .modal-delete {
+            display: block;
+            background: #d9534f;
+            color: #fff;
+            text-align: center;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            margin-top: 10px;
+            width: 100%;
+            font-size: 14px;
+        }
+        .modal-delete:hover { background: #c9302c; }
 
         .empty-state {
             text-align: center;
@@ -469,6 +546,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                 <div class="modal-caption" id="modal-caption"></div>
                 <div class="modal-stats" id="modal-stats"></div>
                 <a class="modal-link" id="modal-link" href="#" target="_blank">View on TikTok</a>
+                <button class="modal-delete" id="modal-delete" onclick="deleteCurrentVideo()">Delete Video</button>
             </div>
         </div>
     </div>
@@ -478,6 +556,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         let videos = [];
         let currentCollection = null;
         let currentFilter = 'all';
+        let currentVideoId = null;
 
         async function loadData() {
             const [collectionsRes, videosRes, statusRes] = await Promise.all([
@@ -593,6 +672,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             const video = videos.find(v => v.id === videoId);
             if (!video) return;
 
+            currentVideoId = videoId;
             const modal = document.getElementById('modal');
             const modalVideo = document.getElementById('modal-video');
 
@@ -651,6 +731,38 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
             if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
             return num.toString();
+        }
+
+        async function deleteCurrentVideo() {
+            if (!currentVideoId) return;
+
+            if (!confirm('Are you sure you want to delete this video and its files?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_id: currentVideoId })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    // Remove from local videos array
+                    videos = videos.filter(v => v.id !== currentVideoId);
+                    closeModal();
+                    renderVideos();
+                    renderCollections();
+                    // Reload status
+                    const statusRes = await fetch('/api/status');
+                    renderStatus(await statusRes.json());
+                } else {
+                    alert('Failed to delete: ' + (result.error || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Error deleting video: ' + err.message);
+            }
         }
 
         // Event listeners
