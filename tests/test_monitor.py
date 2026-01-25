@@ -275,6 +275,167 @@ class TestQueuePersistence(TestCase):
         self.assertEqual(store2.queue["failed"][0]["error"], "Download timeout")
 
 
+class TestDeletedFromTikTok(TestCase):
+    """Tests for tracking videos deleted from TikTok."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.store = DataStore(self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_add_video_sets_deleted_false(self):
+        """New videos should have deleted_from_tiktok set to False."""
+        self.store.add_video("vid123", {
+            "id": "vid123",
+            "deleted_from_tiktok": False,
+        })
+        self.assertFalse(self.store.videos["vid123"].get("deleted_from_tiktok"))
+
+    def test_mark_video_as_deleted(self):
+        """Videos can be marked as deleted from TikTok."""
+        self.store.add_video("vid123", {"id": "vid123", "collection_id": "coll1"})
+
+        # Simulate marking as deleted
+        self.store.videos["vid123"]["deleted_from_tiktok"] = True
+        self.store.videos["vid123"]["deleted_at"] = "2024-01-01T12:00:00"
+
+        self.assertTrue(self.store.videos["vid123"]["deleted_from_tiktok"])
+        self.assertEqual(self.store.videos["vid123"]["deleted_at"], "2024-01-01T12:00:00")
+
+    def test_deleted_status_persists(self):
+        """Deleted from TikTok status should persist across restarts."""
+        store1 = DataStore(self.temp_dir)
+        store1.add_video("vid123", {"id": "vid123", "collection_id": "coll1"})
+        store1.videos["vid123"]["deleted_from_tiktok"] = True
+        store1.videos["vid123"]["deleted_at"] = "2024-01-01T12:00:00"
+        store1.save_videos()
+
+        store2 = DataStore(self.temp_dir)
+        self.assertTrue(store2.videos["vid123"]["deleted_from_tiktok"])
+        self.assertEqual(store2.videos["vid123"]["deleted_at"], "2024-01-01T12:00:00")
+
+    def test_deleted_video_keeps_download_info(self):
+        """A video marked as deleted should retain its download path and status."""
+        self.store.add_video("vid123", {"id": "vid123", "collection_id": "coll1"})
+        self.store.mark_downloaded("vid123", "/path/to/video.mp4")
+
+        # Mark as deleted from TikTok
+        self.store.videos["vid123"]["deleted_from_tiktok"] = True
+
+        # Should still have download info
+        self.assertTrue(self.store.videos["vid123"]["downloaded"])
+        self.assertEqual(self.store.videos["vid123"]["download_path"], "/path/to/video.mp4")
+        self.assertTrue(self.store.videos["vid123"]["deleted_from_tiktok"])
+
+    def test_get_deleted_videos(self):
+        """Can filter videos by deleted_from_tiktok status."""
+        self.store.add_video("vid1", {"id": "vid1", "collection_id": "c1"})
+        self.store.add_video("vid2", {"id": "vid2", "collection_id": "c1"})
+        self.store.add_video("vid3", {"id": "vid3", "collection_id": "c1"})
+
+        # Mark some as deleted
+        self.store.videos["vid1"]["deleted_from_tiktok"] = True
+        self.store.videos["vid3"]["deleted_from_tiktok"] = True
+
+        deleted = [v for v in self.store.videos.values() if v.get("deleted_from_tiktok")]
+        not_deleted = [v for v in self.store.videos.values() if not v.get("deleted_from_tiktok")]
+
+        self.assertEqual(len(deleted), 2)
+        self.assertEqual(len(not_deleted), 1)
+
+
+class TestDeleteVideo(TestCase):
+    """Tests for the delete_video method."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.store = DataStore(self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_delete_removes_from_videos(self):
+        """delete_video should remove video from videos dict."""
+        self.store.add_video("vid123", {"id": "vid123"})
+        self.store.delete_video("vid123")
+        self.assertNotIn("vid123", self.store.videos)
+
+    def test_delete_removes_from_completed_queue(self):
+        """delete_video should remove video from completed queue."""
+        self.store.add_video("vid123", {"id": "vid123"})
+        self.store.queue["completed"].append("vid123")
+        self.store.delete_video("vid123")
+        self.assertNotIn("vid123", self.store.queue["completed"])
+
+    def test_delete_removes_from_pending_queue(self):
+        """delete_video should remove video from pending queue."""
+        self.store.queue_download("vid123", {"url": "test", "collection_name": "Test"})
+        self.store.delete_video("vid123")
+        pending_ids = [v["id"] for v in self.store.queue["pending"]]
+        self.assertNotIn("vid123", pending_ids)
+
+    def test_delete_removes_from_failed_queue(self):
+        """delete_video should remove video from failed queue."""
+        self.store.queue_download("vid123", {"url": "test"})
+        self.store.mark_failed("vid123", "Test error")
+        self.store.delete_video("vid123")
+        failed_ids = [v["id"] for v in self.store.queue["failed"]]
+        self.assertNotIn("vid123", failed_ids)
+
+    def test_delete_removes_video_folder(self):
+        """delete_video should remove the video folder and files."""
+        # Create video folder structure
+        video_dir = Path(self.temp_dir) / "TestCollection" / "vid123"
+        video_dir.mkdir(parents=True)
+        (video_dir / "vid123.mp4").touch()
+        (video_dir / "caption.txt").write_text("Test caption")
+
+        self.store.add_video("vid123", {"id": "vid123", "download_path": str(video_dir / "vid123.mp4")})
+        self.store.delete_video("vid123")
+
+        self.assertFalse(video_dir.exists())
+
+    def test_delete_removes_empty_collection_folder(self):
+        """delete_video should remove empty collection folder after video deletion."""
+        # Create video folder structure
+        collection_dir = Path(self.temp_dir) / "TestCollection"
+        video_dir = collection_dir / "vid123"
+        video_dir.mkdir(parents=True)
+        (video_dir / "vid123.mp4").touch()
+
+        self.store.add_video("vid123", {"id": "vid123", "download_path": str(video_dir / "vid123.mp4")})
+        self.store.delete_video("vid123")
+
+        self.assertFalse(collection_dir.exists())
+
+    def test_delete_keeps_collection_with_other_videos(self):
+        """delete_video should keep collection folder if other videos exist."""
+        # Create collection with two videos
+        collection_dir = Path(self.temp_dir) / "TestCollection"
+        video_dir1 = collection_dir / "vid1"
+        video_dir2 = collection_dir / "vid2"
+        video_dir1.mkdir(parents=True)
+        video_dir2.mkdir(parents=True)
+        (video_dir1 / "vid1.mp4").touch()
+        (video_dir2 / "vid2.mp4").touch()
+
+        self.store.add_video("vid1", {"id": "vid1", "download_path": str(video_dir1 / "vid1.mp4")})
+        self.store.add_video("vid2", {"id": "vid2", "download_path": str(video_dir2 / "vid2.mp4")})
+
+        self.store.delete_video("vid1")
+
+        # Collection folder should still exist with vid2
+        self.assertTrue(collection_dir.exists())
+        self.assertFalse(video_dir1.exists())
+        self.assertTrue(video_dir2.exists())
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

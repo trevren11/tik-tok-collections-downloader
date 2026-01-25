@@ -11,7 +11,6 @@ __pycache__/
 build/
 develop-eggs/
 dist/
-downloads/
 eggs/
 .eggs/
 lib/
@@ -141,9 +140,16 @@ celerybeat.pid
 
 # Project-specific secrets
 config.json
-collections.json
-video_cache.json
+
+# Downloads directory
 downloads/
+
+# Cache files (should be in download_dir, but ignore if in root)
+collections.json
+videos.json
+video_cache.json
+download_queue.json
+
 env/
 venv/
 ENV/

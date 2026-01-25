@@ -18,9 +18,13 @@ env/
 
 # Local config and data
 config.json
-downloads/
-collections.json
 *.log
+
+# Cache files (should be in download_dir)
+collections.json
+videos.json
+video_cache.json
+download_queue.json
 
 # Claude
 .claude/
