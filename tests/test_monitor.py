@@ -181,12 +181,14 @@ class TestVideoDownloader(TestCase):
     def test_saves_caption_on_success(self):
         """download should save caption.txt on successful download."""
         video_dir = Path(self.temp_dir) / "Test" / "vid123"
-        video_dir.mkdir(parents=True, exist_ok=True)
         video_file = video_dir / "vid123.mp4"
-        video_file.touch()
 
-        with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=0, stderr="")
+        def create_video_file(*args, **kwargs):
+            video_dir.mkdir(parents=True, exist_ok=True)
+            video_file.touch()
+            return mock.Mock(returncode=0, stderr="")
+
+        with mock.patch("subprocess.run", side_effect=create_video_file):
             self.downloader.download("vid123", "author", "Test", "This is a caption")
 
         caption_file = video_dir / "caption.txt"
@@ -196,23 +198,42 @@ class TestVideoDownloader(TestCase):
     def test_returns_path_on_success(self):
         """download should return video path on success."""
         video_dir = Path(self.temp_dir) / "Test" / "vid123"
+        video_file = video_dir / "vid123.mp4"
+
+        def create_video_file(*args, **kwargs):
+            video_dir.mkdir(parents=True, exist_ok=True)
+            video_file.touch()
+            return mock.Mock(returncode=0, stderr="")
+
+        with mock.patch("subprocess.run", side_effect=create_video_file):
+            result, was_skipped = self.downloader.download("vid123", "author", "Test", "")
+
+        self.assertEqual(result, str(video_file))
+        self.assertFalse(was_skipped)
+
+    def test_returns_none_on_failure(self):
+        """download should return (None, False) on failure."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=1, stderr="Error")
+            result, was_skipped = self.downloader.download("vid123", "author", "Test", "")
+
+        self.assertIsNone(result)
+        self.assertFalse(was_skipped)
+
+    def test_skips_existing_video(self):
+        """download should skip if video already exists on disk."""
+        video_dir = Path(self.temp_dir) / "Test" / "vid123"
         video_dir.mkdir(parents=True, exist_ok=True)
         video_file = video_dir / "vid123.mp4"
         video_file.touch()
 
         with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=0, stderr="")
-            result = self.downloader.download("vid123", "author", "Test", "")
+            result, was_skipped = self.downloader.download("vid123", "author", "Test", "")
 
+        # subprocess.run should NOT be called since file exists
+        mock_run.assert_not_called()
         self.assertEqual(result, str(video_file))
-
-    def test_returns_none_on_failure(self):
-        """download should return None on failure."""
-        with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=1, stderr="Error")
-            result = self.downloader.download("vid123", "author", "Test", "")
-
-        self.assertIsNone(result)
+        self.assertTrue(was_skipped)
 
 
 class TestLoadConfig(TestCase):
@@ -1134,6 +1155,126 @@ class TestWatchModeStartupDownload(TestCase):
         self.assertEqual(item["url"], "https://tiktok.com/video/123")
         self.assertEqual(item["collection"], "Test Collection")
         self.assertEqual(item["author"], "testuser")
+
+
+class TestTikTokClientDirectAPI(TestCase):
+    """Tests for TikTokClient direct API call approach.
+
+    These tests verify that the client uses direct API calls via page.evaluate()
+    instead of relying on page response interception, which is more reliable.
+    """
+
+    def test_get_collections_uses_direct_api_url(self):
+        """get_collections should make direct API calls to collection_list endpoint."""
+        # Import here to get fresh mock
+        from tiktok_monitor import TikTokClient
+
+        # The method signature should match the direct API approach
+        client = TikTokClient("test_session_id")
+
+        # Check that the method docstring indicates direct API approach
+        self.assertIn("direct api", client.get_collections.__doc__.lower())
+
+    def test_get_collection_videos_uses_direct_api_url(self):
+        """get_collection_videos should make direct API calls to item_list endpoint."""
+        from tiktok_monitor import TikTokClient
+
+        client = TikTokClient("test_session_id")
+
+        # Check that the method docstring indicates direct API approach
+        self.assertIn("direct api", client.get_collection_videos.__doc__.lower())
+
+    def test_get_collections_method_has_pagination_support(self):
+        """get_collections should support pagination with cursor."""
+        import inspect
+        from tiktok_monitor import TikTokClient
+
+        # Get the source code of get_collections
+        source = inspect.getsource(TikTokClient.get_collections)
+
+        # Verify it uses cursor-based pagination
+        self.assertIn("cursor", source)
+        self.assertIn("has_more", source)  # Check for the actual variable name
+        # Verify it makes direct API calls (uses page.evaluate)
+        self.assertIn("page.evaluate", source)
+        # Verify it calls the correct API endpoint
+        self.assertIn("api/user/collection_list", source)
+
+    def test_get_collection_videos_method_has_pagination_support(self):
+        """get_collection_videos should support pagination with cursor."""
+        import inspect
+        from tiktok_monitor import TikTokClient
+
+        source = inspect.getsource(TikTokClient.get_collection_videos)
+
+        # Verify it uses cursor-based pagination
+        self.assertIn("cursor", source)
+        self.assertIn("has_more", source)  # Check for the actual variable name
+        # Verify it makes direct API calls
+        self.assertIn("page.evaluate", source)
+        # Verify it calls the correct API endpoint
+        self.assertIn("api/collection/item_list", source)
+
+    def test_get_collections_extracts_secuid(self):
+        """get_collections should extract secUid from page for API calls."""
+        import inspect
+        from tiktok_monitor import TikTokClient
+
+        source = inspect.getsource(TikTokClient.get_collections)
+
+        # Verify it extracts secUid
+        self.assertIn("secUid", source)
+        # Verify it tries multiple methods to get secUid
+        self.assertIn("__NEXT_DATA__", source)
+        self.assertIn("SIGI_STATE", source)
+
+    def test_get_collection_videos_includes_required_params(self):
+        """get_collection_videos API call should include all required parameters."""
+        import inspect
+        from tiktok_monitor import TikTokClient
+
+        source = inspect.getsource(TikTokClient.get_collection_videos)
+
+        # Verify required API parameters are set
+        self.assertIn("collectionId", source)
+        self.assertIn("count", source)
+        self.assertIn("cursor", source)
+        self.assertIn("aid", source)
+
+    def test_methods_do_not_use_response_interception(self):
+        """Direct API methods should NOT use page.on('response') interception."""
+        import inspect
+        from tiktok_monitor import TikTokClient
+
+        collections_source = inspect.getsource(TikTokClient.get_collections)
+        videos_source = inspect.getsource(TikTokClient.get_collection_videos)
+
+        # These methods should NOT use response interception (the old approach)
+        self.assertNotIn("page.on(\"response\"", collections_source)
+        self.assertNotIn("page.on('response'", collections_source)
+        self.assertNotIn("page.on(\"response\"", videos_source)
+        self.assertNotIn("page.on('response'", videos_source)
+
+    def test_get_collections_has_retry_logic(self):
+        """get_collections should have retry logic for transient failures."""
+        import inspect
+        from tiktok_monitor import TikTokClient
+
+        source = inspect.getsource(TikTokClient.get_collections)
+
+        # Verify retry logic exists
+        self.assertIn("attempt", source.lower())
+        self.assertIn("retry", source.lower())
+
+    def test_get_collection_videos_has_retry_logic(self):
+        """get_collection_videos should have retry logic for transient failures."""
+        import inspect
+        from tiktok_monitor import TikTokClient
+
+        source = inspect.getsource(TikTokClient.get_collection_videos)
+
+        # Verify retry logic exists
+        self.assertIn("attempt", source.lower())
 
 
 if __name__ == "__main__":

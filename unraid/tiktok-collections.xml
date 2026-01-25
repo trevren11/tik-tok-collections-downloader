@@ -18,13 +18,6 @@
   <Description>Automatically monitor and download TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure.</Description>
   <Networking>
     <Mode>bridge</Mode>
-    <Publish>
-      <Port>
-        <HostPort>8425</HostPort>
-        <ContainerPort>8425</ContainerPort>
-        <Protocol>tcp</Protocol>
-      </Port>
-    </Publish>
   </Networking>
   <Data>
     <Volume>
@@ -55,14 +48,6 @@
       <Value></Value>
       <Name>DOWNLOAD_LIMIT</Name>
     </Variable>
-    <Variable>
-      <Value>false</Value>
-      <Name>ENABLE_VIEWER</Name>
-    </Variable>
-    <Variable>
-      <Value>8425</Value>
-      <Name>VIEWER_PORT</Name>
-    </Variable>
   </Environment>
   <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/tiktok-collections" Mode="rw" Description="Path to store config.json with your TikTok session credentials" Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="Downloads Directory" Target="/app/downloads" Default="/mnt/user/downloads/tiktok" Mode="rw" Description="Path where TikTok videos will be downloaded" Type="Path" Display="always" Required="true" Mask="false"/>
@@ -70,7 +55,4 @@
   <Config Name="Sync Interval (minutes)" Target="SYNC_INTERVAL" Default="120" Mode="" Description="How often to check for new videos (in minutes)" Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="Python Unbuffered" Target="PYTHONUNBUFFERED" Default="1" Mode="" Description="Enable real-time log output" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="Download Limit" Target="DOWNLOAD_LIMIT" Default="" Mode="" Description="Limit downloads per sync cycle (e.g., 5 for testing). Leave empty for unlimited." Type="Variable" Display="always" Required="false" Mask="false"/>
-  <Config Name="Enable Viewer" Target="ENABLE_VIEWER" Default="false" Mode="" Description="Enable the web viewer to browse downloaded videos (true/false)" Type="Variable" Display="always" Required="false" Mask="false"/>
-  <Config Name="Viewer Port" Target="VIEWER_PORT" Default="8425" Mode="" Description="Port for the web viewer (only used when Enable Viewer is true)" Type="Variable" Display="always" Required="false" Mask="false"/>
-  <Config Name="Viewer Web Port" Target="8425" Default="8425" Mode="tcp" Description="Web UI port for viewing downloaded videos (change both host and container ports if changing Viewer Port)" Type="Port" Display="always" Required="false" Mask="false"/>
 </Container>
