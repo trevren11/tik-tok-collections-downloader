@@ -132,6 +132,11 @@ class DataStore:
                     shutil.rmtree(video_dir)
                     deleted_path = str(video_dir)
 
+                    # Also remove parent collection folder if empty
+                    collection_dir = video_dir.parent
+                    if collection_dir.exists() and not any(collection_dir.iterdir()):
+                        collection_dir.rmdir()
+
             # Remove from videos
             del self.videos[video_id]
 
@@ -142,6 +147,12 @@ class DataStore:
             self.queue["completed"].remove(video_id)
 
         return deleted_path
+
+    def clear_all_data(self):
+        """Clear all tracking data (collections, videos, queue)."""
+        self.collections = {}
+        self.videos = {}
+        self.queue = {"pending": [], "completed": [], "failed": []}
 
     def get_downloaded_videos(self) -> list:
         """Get list of all downloaded video IDs."""
@@ -439,14 +450,45 @@ def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloade
 
 def cmd_delete(store: DataStore, video_ids: list, delete_all: bool = False):
     """Delete videos and their files."""
+    import shutil
+
     print("\n=== DELETE MODE ===")
 
     if delete_all:
-        video_ids = store.get_downloaded_videos()
-        if not video_ids:
-            print("No downloaded videos to delete.")
+        # Get all video IDs (not just downloaded)
+        video_ids = list(store.videos.keys())
+        if not video_ids and not store.collections:
+            print("No data to delete.")
             return
-        print(f"Deleting all {len(video_ids)} downloaded videos...")
+        print(f"Deleting all data ({len(video_ids)} videos, {len(store.collections)} collections)...")
+
+        # Delete all video folders
+        deleted = 0
+        for vid_id in video_ids:
+            path = store.delete_video(vid_id)
+            if path:
+                deleted += 1
+
+        # Clean up any remaining collection folders in the download directory
+        for item in store.data_dir.iterdir():
+            if item.is_dir() and item.name not in [".", ".."]:
+                # Skip if it's not a collection folder (check if it contains video folders)
+                try:
+                    shutil.rmtree(item)
+                    print(f"  Removed folder: {item.name}")
+                except Exception:
+                    pass
+
+        # Clear all tracking data
+        store.clear_all_data()
+        store.save_collections()
+        store.save_videos()
+        store.save_queue()
+
+        print(f"\n=== DELETE COMPLETE ===")
+        print(f"Deleted {deleted} video(s) and all tracking data")
+        return
+
     elif not video_ids:
         print("No video IDs specified. Use --delete <id> or --delete-all")
         return

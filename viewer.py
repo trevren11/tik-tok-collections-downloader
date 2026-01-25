@@ -190,6 +190,11 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                 shutil.rmtree(video_dir)
                 deleted_path = str(video_dir)
 
+                # Also remove parent collection folder if empty
+                collection_dir = video_dir.parent
+                if collection_dir.exists() and not any(collection_dir.iterdir()):
+                    collection_dir.rmdir()
+
         # Remove from videos
         del videos[video_id]
         with open(videos_file, "w") as f:
