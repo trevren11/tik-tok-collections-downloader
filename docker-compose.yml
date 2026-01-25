@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   tiktok-downloader:
@@ -13,7 +13,9 @@ services:
       # Mount your downloads directory
       - ${DOWNLOAD_DIR:-./downloads}:/app/downloads
     environment:
-      # Sync interval in minutes (default: 30)
-      - SYNC_INTERVAL=${SYNC_INTERVAL:-30}
+      # Disable Python output buffering for real-time logs
+      - PYTHONUNBUFFERED=1
+      # Sync interval in minutes (default: 120)
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-120}
     # Uncomment to run specific commands instead of watch mode:
     # command: ["python", "tiktok_monitor.py", "--sync"]

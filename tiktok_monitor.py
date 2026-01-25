@@ -453,6 +453,7 @@ def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloade
     """Watch mode: periodic sync + download."""
     logger.info(f"=== WATCH MODE (every {interval} minutes) ===")
     logger.info("Press Ctrl+C to stop")
+    logger.info(f"Current status: {len(store.videos)} videos tracked, {len(store.queue['pending'])} pending")
 
     while True:
         try:
