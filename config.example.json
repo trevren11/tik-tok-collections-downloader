@@ -1,13 +1,5 @@
 {
-  "_comment": "Only sessionid is required. The others are optional and may improve reliability.",
-  "cookies": {
-    "sessionid": "YOUR_SESSIONID_HERE",
-    "sessionid_ss": "",
-    "sid_tt": "",
-    "sid_guard": "",
-    "tt_chain_token": "",
-    "tt_csrf_token": "",
-    "msToken": ""
-  },
+  "_comment": "Only sessionid is required.",
+  "sessionid": "YOUR_SESSIONID_HERE",
   "download_dir": "./downloads"
 }

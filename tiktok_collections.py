@@ -116,7 +116,7 @@ def main():
     config = load_config()
 
     # Environment variable overrides config (useful for Docker/Unraid)
-    sessionid = os.environ.get("TIKTOK_SESSION_ID") or config.get("cookies", {}).get("sessionid", "")
+    sessionid = os.environ.get("TIKTOK_SESSION_ID") or config.get("sessionid", "")
 
     if not sessionid:
         print("Error: No sessionid found in TIKTOK_SESSION_ID env var or config.json")

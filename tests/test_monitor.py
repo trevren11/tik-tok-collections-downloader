@@ -232,14 +232,14 @@ class TestLoadConfig(TestCase):
     def test_loads_valid_config(self):
         """load_config should load a valid JSON config file."""
         config_data = {
-            "cookies": {"sessionid": "test123"},
+            "sessionid": "test123",
             "download_dir": "./downloads"
         }
         with open("config.json", "w") as f:
             json.dump(config_data, f)
 
         config = load_config("config.json")
-        self.assertEqual(config["cookies"]["sessionid"], "test123")
+        self.assertEqual(config["sessionid"], "test123")
 
     def test_exits_on_missing_config(self):
         """load_config should exit if config file is missing."""

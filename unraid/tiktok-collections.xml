@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>tiktok-collections</Name>
+  <Repository>yourusername/tiktok-collections:latest</Repository>
+  <Registry>https://hub.docker.com/r/yourusername/tiktok-collections/</Registry>
+  <Branch>
+    <Tag>latest</Tag>
+    <TagDescription>Latest stable release</TagDescription>
+  </Branch>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/yourusername/tiktok-collections-downloader/issues</Support>
+  <Project>https://github.com/yourusername/tiktok-collections-downloader</Project>
+  <Overview>Automatically monitor and download TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure. Runs on a configurable schedule to keep your collection up to date.</Overview>
+  <Category>MediaApp:Video Downloaders:Other</Category>
+  <Icon>https://raw.githubusercontent.com/yourusername/tiktok-collections-downloader/main/icon.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <Description>Automatically monitor and download TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure.</Description>
+  <Networking>
+    <Mode>bridge</Mode>
+  </Networking>
+  <Data>
+    <Volume>
+      <HostDir>/mnt/user/appdata/tiktok-collections</HostDir>
+      <ContainerDir>/app/config</ContainerDir>
+      <Mode>rw</Mode>
+    </Volume>
+    <Volume>
+      <HostDir>/mnt/user/downloads/tiktok</HostDir>
+      <ContainerDir>/app/downloads</ContainerDir>
+      <Mode>rw</Mode>
+    </Volume>
+  </Data>
+  <Environment>
+    <Variable>
+      <Value></Value>
+      <Name>TIKTOK_SESSION_ID</Name>
+    </Variable>
+    <Variable>
+      <Value>120</Value>
+      <Name>SYNC_INTERVAL</Name>
+    </Variable>
+    <Variable>
+      <Value>1</Value>
+      <Name>PYTHONUNBUFFERED</Name>
+    </Variable>
+  </Environment>
+  <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/tiktok-collections" Mode="rw" Description="Path to store config.json with your TikTok session credentials" Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Downloads Directory" Target="/app/downloads" Default="/mnt/user/downloads/tiktok" Mode="rw" Description="Path where TikTok videos will be downloaded" Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="TikTok Session ID" Target="TIKTOK_SESSION_ID" Default="" Mode="" Description="Your TikTok sessionid cookie (get from browser DevTools). Required for authentication." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Sync Interval (minutes)" Target="SYNC_INTERVAL" Default="120" Mode="" Description="How often to check for new videos (in minutes)" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Python Unbuffered" Target="PYTHONUNBUFFERED" Default="1" Mode="" Description="Enable real-time log output" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+</Container>
