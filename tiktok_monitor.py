@@ -13,6 +13,7 @@ Modes:
 
 import argparse
 import json
+import logging
 import subprocess
 import sys
 import time
@@ -21,6 +22,15 @@ from pathlib import Path
 from typing import Optional
 
 from playwright.sync_api import sync_playwright
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
 
 
 class DataStore:
@@ -297,12 +307,12 @@ class VideoDownloader:
                     if f.suffix in [".mp4", ".webm", ".mkv"]:
                         return str(f)
             else:
-                print(f"    yt-dlp error: {result.stderr[:200]}")
+                logger.error(f"yt-dlp error: {result.stderr[:200]}")
 
         except subprocess.TimeoutExpired:
-            print(f"    Download timeout for {video_id}")
+            logger.error(f"Download timeout for {video_id}")
         except Exception as e:
-            print(f"    Download error: {e}")
+            logger.error(f"Download error: {e}")
 
         return None
 
@@ -310,7 +320,7 @@ class VideoDownloader:
 def load_config(config_path: str = "config.json") -> dict:
     path = Path(config_path)
     if not path.exists():
-        print(f"Error: Config file not found: {config_path}")
+        logger.error(f"Config file not found: {config_path}")
         sys.exit(1)
     with open(path) as f:
         return json.load(f)
@@ -318,12 +328,12 @@ def load_config(config_path: str = "config.json") -> dict:
 
 def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[int] = None, video_limit: Optional[int] = None):
     """Sync collections and videos, queue new downloads."""
-    print("\n=== SYNC MODE ===")
+    logger.info("=== SYNC MODE ===")
 
     # Step 1: Fetch collections
-    print("\nFetching collections...")
+    logger.info("Fetching collections...")
     collections = client.get_collections()
-    print(f"Found {len(collections)} collections")
+    logger.info(f"Found {len(collections)} collections")
 
     for coll in collections:
         coll_id = coll.get("collectionId")
@@ -348,10 +358,10 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
     for coll in collections_to_process:
         coll_id = coll["id"]
         coll_name = coll["name"]
-        print(f"\nFetching videos from: {coll_name}")
+        logger.info(f"Fetching videos from: {coll_name}")
 
         videos = client.get_collection_videos(coll_id, coll_name, limit=video_limit)
-        print(f"  Found {len(videos)} videos")
+        logger.info(f"  Found {len(videos)} videos")
 
         # Track which video IDs we found in this sync
         found_video_ids = set()
@@ -388,29 +398,29 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
                     vid_data["deleted_from_tiktok"] = True
                     vid_data["deleted_at"] = datetime.now().isoformat()
                     deleted_count += 1
-                    print(f"  Marked as deleted: {vid_id}")
+                    logger.info(f"  Marked as deleted: {vid_id}")
 
     store.save_videos()
     store.save_queue()
 
-    print(f"\n=== SYNC COMPLETE ===")
-    print(f"New videos found: {new_videos}")
-    print(f"Queued for download: {queued}")
-    print(f"Marked as deleted from TikTok: {deleted_count}")
-    print(f"Pending downloads: {len(store.get_pending_downloads())}")
+    logger.info("=== SYNC COMPLETE ===")
+    logger.info(f"New videos found: {new_videos}")
+    logger.info(f"Queued for download: {queued}")
+    logger.info(f"Marked as deleted from TikTok: {deleted_count}")
+    logger.info(f"Pending downloads: {len(store.get_pending_downloads())}")
 
 
 def cmd_download(store: DataStore, downloader: VideoDownloader, limit: Optional[int] = None):
     """Process download queue."""
-    print("\n=== DOWNLOAD MODE ===")
+    logger.info("=== DOWNLOAD MODE ===")
 
     pending = store.get_pending_downloads()
     if not pending:
-        print("No pending downloads.")
+        logger.info("No pending downloads.")
         return
 
     to_process = pending[:limit] if limit else pending
-    print(f"Processing {len(to_process)} downloads...")
+    logger.info(f"Processing {len(to_process)} downloads...")
 
     for i, item in enumerate(to_process, 1):
         vid_id = item["id"]
@@ -418,34 +428,32 @@ def cmd_download(store: DataStore, downloader: VideoDownloader, limit: Optional[
         collection = item.get("collection", "uncategorized")
         desc = item.get("desc", "")
 
-        print(f"\n[{i}/{len(to_process)}] Downloading {vid_id}")
-        print(f"  Collection: {collection}")
-        print(f"  Author: @{author}")
+        logger.info(f"[{i}/{len(to_process)}] Downloading {vid_id} from {collection} (@{author})")
 
         path = downloader.download(vid_id, author, collection, desc)
 
         if path:
             store.mark_downloaded(vid_id, path)
-            print(f"  Success: {path}")
+            logger.info(f"  Success: {path}")
         else:
             store.mark_failed(vid_id, "Download failed")
-            print(f"  Failed!")
+            logger.warning("  Failed!")
 
         store.save_queue()
         store.save_videos()
 
-    print(f"\n=== DOWNLOAD COMPLETE ===")
-    print(f"Remaining in queue: {len(store.get_pending_downloads())}")
+    logger.info("=== DOWNLOAD COMPLETE ===")
+    logger.info(f"Remaining in queue: {len(store.get_pending_downloads())}")
 
 
 def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloader, interval: int):
     """Watch mode: periodic sync + download."""
-    print(f"\n=== WATCH MODE (every {interval} minutes) ===")
-    print("Press Ctrl+C to stop\n")
+    logger.info(f"=== WATCH MODE (every {interval} minutes) ===")
+    logger.info("Press Ctrl+C to stop")
 
     while True:
         try:
-            print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
+            logger.info("Starting sync cycle...")
 
             # Sync first
             cmd_sync(client, store)
@@ -453,15 +461,15 @@ def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloade
             # Then download
             cmd_download(store, downloader)
 
-            print(f"\nNext check in {interval} minutes...")
+            logger.info(f"Next check in {interval} minutes...")
             time.sleep(interval * 60)
 
         except KeyboardInterrupt:
-            print("\n\nStopping...")
+            logger.info("Stopping...")
             break
         except Exception as e:
-            print(f"\nError: {e}")
-            print(f"Retrying in {interval} minutes...")
+            logger.error(f"Error: {e}")
+            logger.info(f"Retrying in {interval} minutes...")
             time.sleep(interval * 60)
 
 
@@ -469,15 +477,15 @@ def cmd_delete(store: DataStore, video_ids: list, delete_all: bool = False):
     """Delete videos and their files."""
     import shutil
 
-    print("\n=== DELETE MODE ===")
+    logger.info("=== DELETE MODE ===")
 
     if delete_all:
         # Get all video IDs (not just downloaded)
         video_ids = list(store.videos.keys())
         if not video_ids and not store.collections:
-            print("No data to delete.")
+            logger.info("No data to delete.")
             return
-        print(f"Deleting all data ({len(video_ids)} videos, {len(store.collections)} collections)...")
+        logger.info(f"Deleting all data ({len(video_ids)} videos, {len(store.collections)} collections)...")
 
         # Delete all video folders
         deleted = 0
@@ -492,7 +500,7 @@ def cmd_delete(store: DataStore, video_ids: list, delete_all: bool = False):
                 # Skip if it's not a collection folder (check if it contains video folders)
                 try:
                     shutil.rmtree(item)
-                    print(f"  Removed folder: {item.name}")
+                    logger.info(f"  Removed folder: {item.name}")
                 except Exception:
                     pass
 
@@ -502,45 +510,45 @@ def cmd_delete(store: DataStore, video_ids: list, delete_all: bool = False):
         store.save_videos()
         store.save_queue()
 
-        print(f"\n=== DELETE COMPLETE ===")
-        print(f"Deleted {deleted} video(s) and all tracking data")
+        logger.info("=== DELETE COMPLETE ===")
+        logger.info(f"Deleted {deleted} video(s) and all tracking data")
         return
 
     elif not video_ids:
-        print("No video IDs specified. Use --delete <id> or --delete-all")
+        logger.info("No video IDs specified. Use --delete <id> or --delete-all")
         return
 
     deleted = 0
     for vid_id in video_ids:
         path = store.delete_video(vid_id)
         if path:
-            print(f"  Deleted: {vid_id} ({path})")
+            logger.info(f"  Deleted: {vid_id} ({path})")
             deleted += 1
         else:
-            print(f"  Removed from tracking: {vid_id}")
+            logger.info(f"  Removed from tracking: {vid_id}")
 
     store.save_videos()
     store.save_queue()
 
-    print(f"\n=== DELETE COMPLETE ===")
-    print(f"Deleted {deleted} video(s) and files")
+    logger.info("=== DELETE COMPLETE ===")
+    logger.info(f"Deleted {deleted} video(s) and files")
 
 
 def cmd_status(store: DataStore):
     """Show current status."""
     deleted_videos = [v for v in store.videos.values() if v.get("deleted_from_tiktok")]
 
-    print("\n=== STATUS ===")
-    print(f"Collections: {len(store.collections)}")
-    print(f"Videos tracked: {len(store.videos)}")
-    print(f"Deleted from TikTok: {len(deleted_videos)}")
-    print(f"Pending downloads: {len(store.queue['pending'])}")
-    print(f"Completed downloads: {len(store.queue['completed'])}")
-    print(f"Failed downloads: {len(store.queue['failed'])}")
+    logger.info("=== STATUS ===")
+    logger.info(f"Collections: {len(store.collections)}")
+    logger.info(f"Videos tracked: {len(store.videos)}")
+    logger.info(f"Deleted from TikTok: {len(deleted_videos)}")
+    logger.info(f"Pending downloads: {len(store.queue['pending'])}")
+    logger.info(f"Completed downloads: {len(store.queue['completed'])}")
+    logger.info(f"Failed downloads: {len(store.queue['failed'])}")
 
     # Show download state summary by collection
     if store.collections:
-        print("\n--- Collections Overview ---")
+        logger.info("--- Collections Overview ---")
         for coll_id, coll in store.collections.items():
             coll_name = coll.get("name", "Unknown")
             # Count videos in this collection
@@ -551,32 +559,32 @@ def cmd_status(store: DataStore):
             status = f"{downloaded}/{total} downloaded"
             if deleted:
                 status += f", {deleted} deleted"
-            print(f"  {coll_name}: {status}")
+            logger.info(f"  {coll_name}: {status}")
 
     if deleted_videos:
-        print("\n--- Deleted from TikTok ---")
+        logger.info("--- Deleted from TikTok ---")
         for vid in deleted_videos[:10]:
             vid_id = vid.get("id", "unknown")
             coll_name = vid.get("collection_name", "unknown")
             downloaded = "saved" if vid.get("downloaded") else "NOT saved"
-            print(f"  [{coll_name}] {vid_id} - {downloaded}")
+            logger.info(f"  [{coll_name}] {vid_id} - {downloaded}")
         if len(deleted_videos) > 10:
-            print(f"  ... and {len(deleted_videos) - 10} more")
+            logger.info(f"  ... and {len(deleted_videos) - 10} more")
 
     if store.queue["pending"]:
-        print("\n--- Pending Downloads ---")
+        logger.info("--- Pending Downloads ---")
         for item in store.queue["pending"][:10]:
-            print(f"  [{item['collection']}] {item['id']}")
+            logger.info(f"  [{item['collection']}] {item['id']}")
         if len(store.queue["pending"]) > 10:
-            print(f"  ... and {len(store.queue['pending']) - 10} more")
+            logger.info(f"  ... and {len(store.queue['pending']) - 10} more")
 
     if store.queue["failed"]:
-        print("\n--- Failed Downloads ---")
+        logger.info("--- Failed Downloads ---")
         for item in store.queue["failed"][:5]:
             error = item.get("error", "Unknown error")
-            print(f"  [{item['collection']}] {item['id']} - {error}")
+            logger.info(f"  [{item['collection']}] {item['id']} - {error}")
         if len(store.queue["failed"]) > 5:
-            print(f"  ... and {len(store.queue['failed']) - 5} more")
+            logger.info(f"  ... and {len(store.queue['failed']) - 5} more")
 
 
 def main():
@@ -593,13 +601,13 @@ def main():
     parser.add_argument("--delete-all", action="store_true", help="Delete all downloaded videos")
     args = parser.parse_args()
 
-    print("TikTok Collections Monitor")
-    print("-" * 40)
+    logger.info("TikTok Collections Monitor")
+    logger.info("-" * 40)
 
     config = load_config()
     sessionid = config.get("cookies", {}).get("sessionid", "")
     if not sessionid:
-        print("Error: No sessionid found in config.json")
+        logger.error("No sessionid found in config.json")
         sys.exit(1)
 
     download_dir = config.get("download_dir", "./downloads")
@@ -609,7 +617,7 @@ def main():
     store = DataStore(download_dir)
     downloader = VideoDownloader(download_dir)
 
-    print(f"Data/Download dir: {download_dir}")
+    logger.info(f"Data/Download dir: {download_dir}")
 
     if args.status:
         cmd_status(store)

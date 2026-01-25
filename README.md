@@ -168,8 +168,8 @@ Create a `.env` file or set environment variables:
 # Path to your downloads directory
 DOWNLOAD_DIR=/path/to/your/downloads
 
-# Sync interval in minutes (default: 60)
-SYNC_INTERVAL=30
+# Sync interval in minutes (default: 30)
+SYNC_INTERVAL=15
 ```
 
 ### docker-compose.yml
@@ -188,7 +188,7 @@ services:
       - ./config.json:/app/config/config.json:ro
       - ${DOWNLOAD_DIR:-./downloads}:/app/downloads
     environment:
-      - SYNC_INTERVAL=${SYNC_INTERVAL:-60}
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-30}
 ```
 
 The container will:
