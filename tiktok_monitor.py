@@ -191,6 +191,7 @@ class TikTokClient:
         """Fetch all collections."""
         collections = []
 
+        logger.info("Launching browser to fetch collections...")
         with sync_playwright() as p:
             browser, context = self._create_context(p)
             page = context.new_page()
@@ -203,6 +204,7 @@ class TikTokClient:
                             for coll in data["collectionList"]:
                                 if not any(c.get("collectionId") == coll.get("collectionId") for c in collections):
                                     collections.append(coll)
+                                    logger.info(f"  Found collection: {coll.get('name')} ({coll.get('total', 0)} videos)")
                     except Exception:
                         pass
 
@@ -227,6 +229,7 @@ class TikTokClient:
                         data = response.json()
                         if "itemList" in data:
                             videos.extend(data["itemList"])
+                            logger.info(f"    Loaded {len(videos)} videos...")
                     except Exception:
                         pass
 
