@@ -38,6 +38,9 @@ def get_collections_with_browser(sessionid: str) -> tuple[list, list]:
     """
     collections = []
     api_responses = []
+    cursor = "0"
+    has_more = True
+    api_base_url = None
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -54,31 +57,110 @@ def get_collections_with_browser(sessionid: str) -> tuple[list, list]:
         page = context.new_page()
 
         def handle_response(response):
+            nonlocal has_more, cursor, api_base_url
             url = response.url
             # Only capture collection_list API responses
             if "collection_list" in url:
                 try:
                     data = response.json()
                     api_responses.append({"url": url, "data": data})
+
+                    # Save the base URL for pagination (strip cursor param)
+                    if api_base_url is None:
+                        api_base_url = url.split("?")[0] + "?" + "&".join(
+                            p for p in url.split("?")[1].split("&")
+                            if not p.startswith("cursor=")
+                        )
+
                     # Extract collections from this response
                     if "collectionList" in data:
                         for coll in data["collectionList"]:
                             # Avoid duplicates
                             if not any(c.get("collectionId") == coll.get("collectionId") for c in collections):
                                 collections.append(coll)
+                                print(f"  Found: {coll.get('name')} ({coll.get('total', 0)} videos)")
+
+                    # Check if there are more collections to load
+                    has_more = data.get("hasMore", False)
+                    if has_more and "cursor" in data:
+                        cursor = str(data["cursor"])
                 except Exception:
                     pass
 
         page.on("response", handle_response)
 
-        print("Navigating to TikTok...")
-        page.goto("https://www.tiktok.com/", wait_until="networkidle", timeout=30000)
+        print("Navigating to TikTok profile...")
+        page.goto("https://www.tiktok.com/@me", wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(3000)
 
-        # The collection_list API gets called automatically when logged in
-        # Wait a bit more to ensure all requests complete
+        # Try clicking on Collections tab to trigger the API
+        try:
+            collections_selectors = [
+                '[data-e2e="saved-tab"]',
+                'a[href*="collection"]',
+                'span:has-text("Collections")',
+                'span:has-text("Saved")',
+            ]
+            for selector in collections_selectors:
+                if page.locator(selector).count() > 0:
+                    print(f"  Clicking collections tab...")
+                    page.locator(selector).first.click()
+                    page.wait_for_timeout(3000)
+                    break
+        except Exception:
+            pass
+
+        # Wait for initial API response
         page.wait_for_timeout(2000)
 
+        # Now paginate through remaining collections using direct API calls
+        print("Loading all collections...")
+        max_pages = 50  # Safety limit
+        page_num = 1
+
+        while has_more and api_base_url and page_num < max_pages:
+            page_num += 1
+            print(f"  Fetching page {page_num} (cursor: {cursor[:20]}...)...")
+
+            # Make API request with cursor using page.evaluate to use the browser's session
+            try:
+                api_url = f"{api_base_url}&cursor={cursor}"
+                response_data = page.evaluate(f"""
+                    async () => {{
+                        const response = await fetch("{api_url}", {{
+                            credentials: 'include',
+                            headers: {{
+                                'Accept': 'application/json'
+                            }}
+                        }});
+                        return await response.json();
+                    }}
+                """)
+
+                if response_data:
+                    api_responses.append({"url": api_url, "data": response_data})
+
+                    if "collectionList" in response_data:
+                        for coll in response_data["collectionList"]:
+                            if not any(c.get("collectionId") == coll.get("collectionId") for c in collections):
+                                collections.append(coll)
+                                print(f"  Found: {coll.get('name')} ({coll.get('total', 0)} videos)")
+
+                    has_more = response_data.get("hasMore", False)
+                    if has_more and "cursor" in response_data:
+                        cursor = str(response_data["cursor"])
+                    else:
+                        has_more = False
+                else:
+                    has_more = False
+
+            except Exception as e:
+                print(f"  Error fetching page {page_num}: {e}")
+                break
+
+            page.wait_for_timeout(500)  # Small delay between requests
+
+        print(f"Finished loading {len(collections)} collections")
         browser.close()
 
     return collections, api_responses

@@ -19,12 +19,5 @@ services:
       - SYNC_INTERVAL=${SYNC_INTERVAL:-120}
       # Download directory inside container (maps to mounted volume)
       - DOWNLOAD_DIR=/app/downloads
-      # Viewer port (default: 8425) - only used when ENABLE_VIEWER=true
-      - VIEWER_PORT=${VIEWER_PORT:-8425}
-      # Enable web viewer (default: false)
-      - ENABLE_VIEWER=${ENABLE_VIEWER:-false}
-    # Expose viewer port when enabled
-    ports:
-      - "${VIEWER_PORT:-8425}:${VIEWER_PORT:-8425}"
     # Uncomment to run specific commands instead of watch mode:
     # command: ["python", "tiktok_monitor.py", "--sync"]
