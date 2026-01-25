@@ -138,6 +138,11 @@ celerybeat.pid
 .env
 .envrc
 .venv
+
+# Project-specific secrets
+config.json
+collections.json
+downloads/
 env/
 venv/
 ENV/
