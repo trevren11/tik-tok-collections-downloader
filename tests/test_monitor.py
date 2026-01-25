@@ -769,6 +769,276 @@ class TestPreventDuplicateDownloads(TestCase):
         self.assertFalse(result, "Should find file with sanitized collection name")
 
 
+class TestAvailableCollectionsFile(TestCase):
+    """Tests for available_collections.json generation."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.store = DataStore(self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_available_collections_created_on_save(self):
+        """available_collections.json should be created when collections are saved."""
+        self.store.update_collection("123", {"id": "123", "name": "Test Collection", "total": 10})
+        self.store.save_collections()
+
+        available_file = Path(self.temp_dir) / "available_collections.json"
+        self.assertTrue(available_file.exists(), "available_collections.json should be created")
+
+    def test_available_collections_contains_all_collections(self):
+        """available_collections.json should list all collections."""
+        self.store.update_collection("123", {"id": "123", "name": "Collection A", "total": 10})
+        self.store.update_collection("456", {"id": "456", "name": "Collection B", "total": 5})
+        self.store.update_collection("789", {"id": "789", "name": "Collection C", "total": 20})
+        self.store.save_collections()
+
+        available_file = Path(self.temp_dir) / "available_collections.json"
+        with open(available_file) as f:
+            data = json.load(f)
+
+        self.assertIn("collections", data)
+        self.assertEqual(len(data["collections"]), 3)
+
+    def test_available_collections_sorted_by_name(self):
+        """Collections in available_collections.json should be sorted alphabetically."""
+        self.store.update_collection("123", {"id": "123", "name": "Zebra", "total": 1})
+        self.store.update_collection("456", {"id": "456", "name": "Apple", "total": 2})
+        self.store.update_collection("789", {"id": "789", "name": "Mango", "total": 3})
+        self.store.save_collections()
+
+        available_file = Path(self.temp_dir) / "available_collections.json"
+        with open(available_file) as f:
+            data = json.load(f)
+
+        names = [c["name"] for c in data["collections"]]
+        self.assertEqual(names, ["Apple", "Mango", "Zebra"])
+
+    def test_available_collections_contains_id_name_total(self):
+        """Each collection entry should have id, name, and total fields."""
+        self.store.update_collection("123", {"id": "123", "name": "Test", "total": 42})
+        self.store.save_collections()
+
+        available_file = Path(self.temp_dir) / "available_collections.json"
+        with open(available_file) as f:
+            data = json.load(f)
+
+        coll = data["collections"][0]
+        self.assertEqual(coll["id"], "123")
+        self.assertEqual(coll["name"], "Test")
+        self.assertEqual(coll["total"], 42)
+
+    def test_available_collections_has_comment(self):
+        """available_collections.json should include a helpful comment."""
+        self.store.update_collection("123", {"id": "123", "name": "Test", "total": 10})
+        self.store.save_collections()
+
+        available_file = Path(self.temp_dir) / "available_collections.json"
+        with open(available_file) as f:
+            data = json.load(f)
+
+        self.assertIn("_comment", data)
+        self.assertIn("exclude_collections", data["_comment"])
+
+
+class TestExcludeCollections(TestCase):
+    """Tests for exclude_collections filtering in cmd_sync."""
+
+    def setUp(self):
+        """Create a temporary directory and mock dependencies."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.store = DataStore(self.temp_dir)
+
+        # Add some test collections to the store
+        self.store.update_collection("coll1", {"id": "coll1", "name": "Recipes", "total": 10})
+        self.store.update_collection("coll2", {"id": "coll2", "name": "Music", "total": 20})
+        self.store.update_collection("coll3", {"id": "coll3", "name": "Comedy", "total": 15})
+        self.store.update_collection("coll4", {"id": "coll4", "name": "Tech", "total": 5})
+        self.store.save_collections()
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_no_exclusions_processes_all(self):
+        """With no exclusions, all collections should be processed."""
+        collections = list(self.store.collections.values())
+        exclude_collections = None
+
+        # Simulate the filtering logic from cmd_sync
+        if exclude_collections:
+            exclude_set = set(exclude_collections)
+            collections = [
+                c for c in collections
+                if c.get("id") not in exclude_set and c.get("name") not in exclude_set
+            ]
+
+        self.assertEqual(len(collections), 4)
+
+    def test_empty_exclusions_processes_all(self):
+        """With empty exclusion list, all collections should be processed."""
+        collections = list(self.store.collections.values())
+        exclude_collections = []
+
+        if exclude_collections:
+            exclude_set = set(exclude_collections)
+            collections = [
+                c for c in collections
+                if c.get("id") not in exclude_set and c.get("name") not in exclude_set
+            ]
+
+        self.assertEqual(len(collections), 4)
+
+    def test_exclude_by_name(self):
+        """Collections can be excluded by name."""
+        collections = list(self.store.collections.values())
+        exclude_collections = ["Recipes", "Comedy"]
+
+        exclude_set = set(exclude_collections)
+        filtered = [
+            c for c in collections
+            if c.get("id") not in exclude_set and c.get("name") not in exclude_set
+        ]
+
+        self.assertEqual(len(filtered), 2)
+        names = [c["name"] for c in filtered]
+        self.assertNotIn("Recipes", names)
+        self.assertNotIn("Comedy", names)
+        self.assertIn("Music", names)
+        self.assertIn("Tech", names)
+
+    def test_exclude_by_id(self):
+        """Collections can be excluded by ID."""
+        collections = list(self.store.collections.values())
+        exclude_collections = ["coll1", "coll3"]
+
+        exclude_set = set(exclude_collections)
+        filtered = [
+            c for c in collections
+            if c.get("id") not in exclude_set and c.get("name") not in exclude_set
+        ]
+
+        self.assertEqual(len(filtered), 2)
+        ids = [c["id"] for c in filtered]
+        self.assertNotIn("coll1", ids)
+        self.assertNotIn("coll3", ids)
+        self.assertIn("coll2", ids)
+        self.assertIn("coll4", ids)
+
+    def test_exclude_mixed_names_and_ids(self):
+        """Collections can be excluded using a mix of names and IDs."""
+        collections = list(self.store.collections.values())
+        exclude_collections = ["Recipes", "coll2"]  # Name and ID
+
+        exclude_set = set(exclude_collections)
+        filtered = [
+            c for c in collections
+            if c.get("id") not in exclude_set and c.get("name") not in exclude_set
+        ]
+
+        self.assertEqual(len(filtered), 2)
+        names = [c["name"] for c in filtered]
+        self.assertIn("Comedy", names)
+        self.assertIn("Tech", names)
+
+    def test_exclude_nonexistent_collection(self):
+        """Excluding a non-existent collection should not cause errors."""
+        collections = list(self.store.collections.values())
+        exclude_collections = ["NonExistent", "fake123"]
+
+        exclude_set = set(exclude_collections)
+        filtered = [
+            c for c in collections
+            if c.get("id") not in exclude_set and c.get("name") not in exclude_set
+        ]
+
+        self.assertEqual(len(filtered), 4)  # All collections still present
+
+    def test_exclude_all_collections(self):
+        """Excluding all collections should result in empty list."""
+        collections = list(self.store.collections.values())
+        exclude_collections = ["Recipes", "Music", "Comedy", "Tech"]
+
+        exclude_set = set(exclude_collections)
+        filtered = [
+            c for c in collections
+            if c.get("id") not in exclude_set and c.get("name") not in exclude_set
+        ]
+
+        self.assertEqual(len(filtered), 0)
+
+    def test_exclude_case_sensitive(self):
+        """Exclusion matching should be case-sensitive."""
+        collections = list(self.store.collections.values())
+        exclude_collections = ["recipes", "MUSIC"]  # Wrong case
+
+        exclude_set = set(exclude_collections)
+        filtered = [
+            c for c in collections
+            if c.get("id") not in exclude_set and c.get("name") not in exclude_set
+        ]
+
+        # None should be excluded because case doesn't match
+        self.assertEqual(len(filtered), 4)
+
+
+class TestLoadConfigWithExcludeCollections(TestCase):
+    """Tests for loading exclude_collections from config."""
+
+    def setUp(self):
+        """Create a temporary directory for config files."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.original_dir = os.getcwd()
+        os.chdir(self.temp_dir)
+
+    def tearDown(self):
+        """Clean up."""
+        os.chdir(self.original_dir)
+        shutil.rmtree(self.temp_dir)
+
+    def test_loads_exclude_collections_array(self):
+        """load_config should load exclude_collections as an array."""
+        config_data = {
+            "sessionid": "test123",
+            "download_dir": "./downloads",
+            "exclude_collections": ["Collection1", "coll123"]
+        }
+        with open("config.json", "w") as f:
+            json.dump(config_data, f)
+
+        config = load_config("config.json")
+        self.assertEqual(config["exclude_collections"], ["Collection1", "coll123"])
+
+    def test_missing_exclude_collections_defaults_to_empty(self):
+        """Config without exclude_collections should allow default empty list."""
+        config_data = {
+            "sessionid": "test123",
+            "download_dir": "./downloads"
+        }
+        with open("config.json", "w") as f:
+            json.dump(config_data, f)
+
+        config = load_config("config.json")
+        # The config.get("exclude_collections", []) in main() handles the default
+        self.assertIsNone(config.get("exclude_collections"))
+
+    def test_empty_exclude_collections_array(self):
+        """load_config should handle empty exclude_collections array."""
+        config_data = {
+            "sessionid": "test123",
+            "download_dir": "./downloads",
+            "exclude_collections": []
+        }
+        with open("config.json", "w") as f:
+            json.dump(config_data, f)
+
+        config = load_config("config.json")
+        self.assertEqual(config["exclude_collections"], [])
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

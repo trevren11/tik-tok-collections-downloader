@@ -1,5 +1,7 @@
 {
   "_comment": "Only sessionid is required.",
   "sessionid": "YOUR_SESSIONID_HERE",
-  "download_dir": "./downloads"
+  "download_dir": "./downloads",
+  "exclude_collections": [],
+  "_exclude_collections_comment": "Array of collection names or IDs to skip. See available_collections.json in your download_dir for reference."
 }

@@ -170,6 +170,24 @@ class DataStore:
     def save_collections(self):
         self._save(self.collections_file, self.collections)
         self._write_data_js()
+        self._write_available_collections()
+
+    def _write_available_collections(self):
+        """Write a reference file listing all available collections for exclusion config."""
+        available_file = self.data_dir / "available_collections.json"
+        collections_list = []
+        for coll_id, coll in self.collections.items():
+            collections_list.append({
+                "id": coll_id,
+                "name": coll.get("name", "Unknown"),
+                "total": coll.get("total", 0),
+            })
+        # Sort by name for easier reading
+        collections_list.sort(key=lambda x: x["name"].lower())
+        self._save(available_file, {
+            "_comment": "Reference file for exclude_collections config. Use 'id' or 'name' values.",
+            "collections": collections_list,
+        })
 
     def save_videos(self):
         self._save(self.videos_file, self.videos)
@@ -809,7 +827,7 @@ def _process_collection_videos(store: DataStore, coll_id: str, coll_name: str, v
     return new_count, queued_count, deleted_count, found_video_ids
 
 
-def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[int] = None, video_limit: Optional[int] = None, downloader: Optional[VideoDownloader] = None, max_parallel: int = 10):
+def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[int] = None, video_limit: Optional[int] = None, downloader: Optional[VideoDownloader] = None, max_parallel: int = 10, exclude_collections: Optional[list] = None):
     """Sync collections and videos, queue new downloads. Optionally download after each collection."""
     logger.info("=== SYNC MODE ===")
 
@@ -830,6 +848,19 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
 
     # Step 2: Fetch videos for each collection (in parallel)
     collections_to_process = list(store.collections.values())
+
+    # Filter out excluded collections (by name or ID)
+    if exclude_collections:
+        exclude_set = set(exclude_collections)
+        before_count = len(collections_to_process)
+        collections_to_process = [
+            c for c in collections_to_process
+            if c.get("id") not in exclude_set and c.get("name") not in exclude_set
+        ]
+        excluded_count = before_count - len(collections_to_process)
+        if excluded_count > 0:
+            logger.info(f"Excluding {excluded_count} collection(s) per config")
+
     if collection_limit:
         collections_to_process = collections_to_process[:collection_limit]
 
@@ -837,51 +868,34 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
     downloaded = 0
     deleted_count = 0
 
-    logger.info(f"Fetching videos from {len(collections_to_process)} collections (up to {max_parallel} in parallel)...")
+    logger.info(f"Fetching videos from {len(collections_to_process)} collections...")
 
-    def fetch_worker(coll):
-        """Worker function to fetch videos for a collection."""
+    # Fetch collections sequentially (each needs its own browser instance)
+    for i, coll in enumerate(collections_to_process, 1):
         coll_id = coll["id"]
         coll_name = coll["name"]
-        thread_id = threading.current_thread().name
-        logger.info(f"  [{thread_id}] Starting fetch: {coll_name}")
+        logger.info(f"  [{i}/{len(collections_to_process)}] Fetching: {coll_name}")
+
         try:
             videos = client.get_collection_videos(coll_id, coll_name, limit=video_limit)
-            logger.info(f"  [{thread_id}] Finished fetch: {coll_name} ({len(videos)} videos)")
-            return {"coll_id": coll_id, "coll_name": coll_name, "videos": videos, "error": None}
+            logger.info(f"  [{i}/{len(collections_to_process)}] {coll_name}: Found {len(videos)} videos")
         except Exception as e:
-            logger.error(f"  [{thread_id}] Error fetching {coll_name}: {e}")
-            return {"coll_id": coll_id, "coll_name": coll_name, "videos": [], "error": str(e)}
+            logger.error(f"  [{i}/{len(collections_to_process)}] Error fetching {coll_name}: {e}")
+            continue
 
-    # Submit all collection fetches to thread pool
-    with ThreadPoolExecutor(max_workers=max_parallel) as executor:
-        future_to_coll = {executor.submit(fetch_worker, coll): coll for coll in collections_to_process}
+        # Process the fetched videos
+        new_count, queued_count, del_count, _ = _process_collection_videos(
+            store, coll_id, coll_name, videos
+        )
+        new_videos += new_count
+        deleted_count += del_count
 
-        # Process results as they complete
-        for future in as_completed(future_to_coll):
-            result = future.result()
-            coll_id = result["coll_id"]
-            coll_name = result["coll_name"]
-            videos = result["videos"]
-
-            logger.info(f"  {coll_name}: Found {len(videos)} videos")
-
-            if result["error"]:
-                continue
-
-            # Process the fetched videos
-            new_count, queued_count, del_count, _ = _process_collection_videos(
-                store, coll_id, coll_name, videos
-            )
-            new_videos += new_count
-            deleted_count += del_count
-
-            # Download immediately if downloader is provided
-            if downloader and queued_count > 0:
-                store.save_videos()
-                store.save_queue()
-                logger.info(f"  Downloading {queued_count} new videos from {coll_name}...")
-                downloaded += _download_collection_videos(store, downloader, coll_id)
+        # Download immediately if downloader is provided (parallel downloads still work)
+        if downloader and queued_count > 0:
+            store.save_videos()
+            store.save_queue()
+            logger.info(f"  Downloading {queued_count} new videos from {coll_name}...")
+            downloaded += _download_collection_videos(store, downloader, coll_id, max_parallel)
 
     # Step 3: Fetch favorited videos (not in any collection)
     logger.info("Fetching favorited videos (not in collections)...")
@@ -1015,7 +1029,7 @@ def cmd_download(store: DataStore, downloader: VideoDownloader, limit: Optional[
     logger.info(f"Remaining in queue: {len(store.get_pending_downloads())}")
 
 
-def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloader, interval: int):
+def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloader, interval: int, exclude_collections: Optional[list] = None):
     """Watch mode: periodic sync + download."""
     logger.info(f"=== WATCH MODE (every {interval} minutes) ===")
     logger.info("Press Ctrl+C to stop")
@@ -1026,7 +1040,7 @@ def cmd_watch(client: TikTokClient, store: DataStore, downloader: VideoDownloade
             logger.info("Starting sync cycle...")
 
             # Sync and download - downloads happen after each collection
-            cmd_sync(client, store, downloader=downloader)
+            cmd_sync(client, store, downloader=downloader, exclude_collections=exclude_collections)
 
             # Process any remaining downloads (e.g., from previous failed attempts)
             cmd_download(store, downloader)
@@ -1194,6 +1208,7 @@ def main():
         sys.exit(1)
 
     download_dir = os.environ.get("DOWNLOAD_DIR") or config.get("download_dir", "./downloads")
+    exclude_collections = config.get("exclude_collections", [])
 
     # Initialize
     client = TikTokClient(sessionid)
@@ -1208,14 +1223,14 @@ def main():
     elif args.delete or args.delete_all:
         cmd_delete(store, args.delete or [], args.delete_all)
     elif args.sync:
-        cmd_sync(client, store, args.collection_limit, args.video_limit)
+        cmd_sync(client, store, args.collection_limit, args.video_limit, exclude_collections=exclude_collections)
     elif args.download:
         cmd_download(store, downloader, args.limit)
     elif args.watch:
-        cmd_watch(client, store, downloader, args.interval)
+        cmd_watch(client, store, downloader, args.interval, exclude_collections=exclude_collections)
     else:
         # Default: sync then download
-        cmd_sync(client, store, args.collection_limit, args.video_limit)
+        cmd_sync(client, store, args.collection_limit, args.video_limit, exclude_collections=exclude_collections)
         cmd_download(store, downloader, args.limit)
 
 
