@@ -133,7 +133,7 @@ Browse your downloaded videos with the web viewer:
 python viewer.py
 ```
 
-Open http://localhost:8080 in your browser to:
+Open http://localhost:8425 in your browser to:
 - Browse collections
 - Watch videos with metadata displayed
 - See download status
@@ -184,7 +184,7 @@ services:
     container_name: tiktok-collections
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8425:8425"
     volumes:
       - ./config.json:/app/config/config.json:ro
       - ${DOWNLOAD_DIR:-./downloads}:/app/downloads
@@ -193,7 +193,7 @@ services:
 ```
 
 The container will:
-- Start the web viewer on port 8080
+- Start the web viewer on port 8425
 - Run the monitor in watch mode (sync + download periodically)
 - Store all data in the mounted downloads directory
 
@@ -205,7 +205,7 @@ docker build -t tiktok-collections .
 
 # Run with custom settings
 docker run -d \
-  -p 8080:8080 \
+  -p 8425:8425 \
   -v $(pwd)/config.json:/app/config/config.json:ro \
   -v /path/to/downloads:/app/downloads \
   -e SYNC_INTERVAL=30 \

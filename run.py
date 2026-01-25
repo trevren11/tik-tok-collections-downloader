@@ -15,7 +15,7 @@ import threading
 import time
 import signal
 
-def run_viewer(port=8080):
+def run_viewer(port=8425):
     """Run the web viewer."""
     print(f"Starting viewer on http://localhost:{port}")
     subprocess.run([sys.executable, "viewer.py", "-p", str(port)])
@@ -34,8 +34,8 @@ def main():
                         help="Run monitor in watch mode (periodic sync)")
     parser.add_argument("--interval", "-i", type=int, default=30,
                         help="Watch interval in minutes (default: 30)")
-    parser.add_argument("--port", "-p", type=int, default=8080,
-                        help="Viewer port (default: 8080)")
+    parser.add_argument("--port", "-p", type=int, default=8425,
+                        help="Viewer port (default: 8425)")
     parser.add_argument("--viewer-only", action="store_true",
                         help="Only run the viewer, skip monitor")
     parser.add_argument("--sync-only", action="store_true",
