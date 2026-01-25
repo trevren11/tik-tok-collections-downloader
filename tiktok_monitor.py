@@ -421,19 +421,31 @@ class TikTokClient:
         return browser, context
 
     def get_collections(self) -> list:
-        """Fetch all collections with pagination support."""
+        """Fetch all collections."""
         collections = []
-        cursor = 0
-        has_more = True
 
         logger.info("Launching browser to fetch collections...")
         with sync_playwright() as p:
             browser, context = self._create_context(p)
             page = context.new_page()
 
-            # Navigate to home page first to establish session and get user info
+            def handle_response(response):
+                if "collection_list" in response.url:
+                    try:
+                        data = response.json()
+                        if "collectionList" in data:
+                            for coll in data["collectionList"]:
+                                if not any(c.get("collectionId") == coll.get("collectionId") for c in collections):
+                                    collections.append(coll)
+                                    logger.info(f"  Found collection: {coll.get('name')} ({coll.get('total', 0)} videos)")
+                    except Exception:
+                        pass
+
+            page.on("response", handle_response)
+
+            # Navigate to profile page which should trigger collections API
             try:
-                page.goto("https://www.tiktok.com/", wait_until="domcontentloaded", timeout=60000)
+                page.goto("https://www.tiktok.com/@me", wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
 
                 # Check page title to detect issues
@@ -442,263 +454,122 @@ class TikTokClient:
 
                 if "captcha" in title.lower() or "verify" in title.lower():
                     logger.error("TikTok is showing a captcha/verification page - session may be flagged")
-                    browser.close()
-                    return collections
+                elif "login" in title.lower():
+                    logger.error("TikTok is showing login page - sessionid may be expired")
 
-                # Try to get the current user's secUid from the page
-                logger.info("  Extracting user secUid...")
-                sec_uid = page.evaluate("""
-                    () => {
-                        // Try to get from window object (TikTok stores user data there)
-                        if (window.__NEXT_DATA__?.props?.pageProps?.userInfo?.user?.secUid) {
-                            return window.__NEXT_DATA__.props.pageProps.userInfo.user.secUid;
-                        }
-                        // Try SIGI_STATE
-                        if (window.SIGI_STATE?.UserModule?.users) {
-                            const users = Object.values(window.SIGI_STATE.UserModule.users);
-                            if (users.length > 0) return users[0].secUid;
-                        }
-                        // Try to find in any script tags
-                        const scripts = document.querySelectorAll('script');
-                        for (const script of scripts) {
-                            const match = script.textContent?.match(/"secUid":"([^"]+)"/);
-                            if (match) return match[1];
-                        }
-                        return null;
-                    }
-                """)
-
-                if not sec_uid:
-                    # Navigate to profile to get secUid
-                    logger.info("  Navigating to profile to get secUid...")
-                    page.goto("https://www.tiktok.com/profile", wait_until="domcontentloaded", timeout=60000)
-                    page.wait_for_timeout(3000)
-
-                    sec_uid = page.evaluate("""
-                        () => {
-                            // Check URL for username, then get secUid from page data
-                            if (window.__NEXT_DATA__?.props?.pageProps?.userInfo?.user?.secUid) {
-                                return window.__NEXT_DATA__.props.pageProps.userInfo.user.secUid;
-                            }
-                            if (window.SIGI_STATE?.UserModule?.users) {
-                                const users = Object.values(window.SIGI_STATE.UserModule.users);
-                                if (users.length > 0) return users[0].secUid;
-                            }
-                            // Try __DEFAULT_SCOPE__
-                            if (window.__DEFAULT_SCOPE__?.['webapp.user-detail']?.userInfo?.user?.secUid) {
-                                return window.__DEFAULT_SCOPE__['webapp.user-detail'].userInfo.user.secUid;
-                            }
-                            return null;
-                        }
-                    """)
-
-                if sec_uid:
-                    logger.info(f"  Found secUid: {sec_uid[:20]}...")
-                else:
-                    logger.warning("  Could not find secUid - API calls may fail")
-                    sec_uid = ""
-
-                # Make direct API calls for collections with pagination
-                logger.info("  Fetching collections via direct API calls...")
-                page_num = 0
-                max_pages = 50
-
-                while has_more and page_num < max_pages:
-                    page_num += 1
-                    logger.info(f"  Fetching collections page {page_num} (cursor: {cursor})...")
-
+                # Try clicking on Collections tab if no collections found yet
+                if not collections:
                     try:
-                        # Retry logic for transient failures
-                        response_data = None
-                        for attempt in range(3):
-                            response_data = page.evaluate("""
-                                async ([cursor, secUid]) => {
-                                    const url = new URL('https://www.tiktok.com/api/user/collection_list/');
-                                    url.searchParams.set('aid', '1988');
-                                    url.searchParams.set('count', '30');
-                                    url.searchParams.set('cursor', cursor.toString());
-                                    url.searchParams.set('secUid', secUid);
-
-                                    try {
-                                        const response = await fetch(url.toString(), {
-                                            method: 'GET',
-                                            credentials: 'include',
-                                            headers: {
-                                                'Accept': 'application/json, text/plain, */*',
-                                                'Accept-Language': 'en-US,en;q=0.9',
-                                            }
-                                        });
-                                        const text = await response.text();
-                                        try {
-                                            return JSON.parse(text);
-                                        } catch (e) {
-                                            return { error: 'JSON parse error', textLength: text.length };
-                                        }
-                                    } catch (e) {
-                                        return { error: e.toString() };
-                                    }
-                                }
-                            """, [cursor, sec_uid])
-
-                            if response_data and 'error' not in response_data:
+                        # Look for collections/saved tab
+                        collections_selectors = [
+                            '[data-e2e="saved-tab"]',
+                            'a[href*="collection"]',
+                            'span:has-text("Collections")',
+                            'span:has-text("Saved")',
+                        ]
+                        for selector in collections_selectors:
+                            if page.locator(selector).count() > 0:
+                                logger.info(f"  Clicking collections tab: {selector}")
+                                page.locator(selector).first.click()
+                                page.wait_for_timeout(3000)
                                 break
-                            if attempt < 2:
-                                logger.info(f"  Retrying page {page_num} (attempt {attempt + 2}/3)...")
-                                page.wait_for_timeout(1000)
-
-                        if not response_data or 'error' in response_data:
-                            logger.warning(f"  API error after retries: {response_data.get('error', 'unknown')}")
-                            # Continue to next page instead of breaking - cursor might still work
-                            cursor += 30
-                            continue
-
-                        status_code = response_data.get("status_code") or response_data.get("statusCode", 0)
-                        if status_code != 0:
-                            logger.warning(f"  API returned status_code: {status_code}")
-
-                        coll_list = response_data.get("collectionList", [])
-                        logger.info(f"  Got {len(coll_list)} collections in this page")
-
-                        for coll in coll_list:
-                            if not any(c.get("collectionId") == coll.get("collectionId") for c in collections):
-                                collections.append(coll)
-                                logger.info(f"  Found collection: {coll.get('name')} ({coll.get('total', 0)} videos)")
-
-                        has_more = response_data.get("hasMore", False)
-                        if has_more:
-                            new_cursor = response_data.get("cursor")
-                            cursor = int(new_cursor) if new_cursor else cursor + 30
-                        else:
-                            logger.info(f"  No more collections (hasMore={has_more})")
-
                     except Exception as e:
-                        logger.warning(f"  Error fetching collections page {page_num}: {e}")
-                        # Try to continue with next cursor instead of breaking
-                        cursor += 30
-                        continue
+                        logger.warning(f"  Could not click collections tab: {e}")
 
-                    page.wait_for_timeout(500)
+                # Wait for API responses
+                page.wait_for_timeout(3000)
 
             except Exception as e:
-                logger.warning(f"Navigation issue: {e}")
+                logger.warning(f"Navigation issue (may still work): {e}")
+                if collections:
+                    logger.info(f"  Got {len(collections)} collections despite navigation issue")
 
             browser.close()
 
-        logger.info(f"  Total collections found: {len(collections)}")
         return collections
 
     def get_collection_videos(self, collection_id: str, collection_name: str, limit: Optional[int] = None, quick_check: bool = False) -> list:
-        """Fetch videos in a collection using direct API calls.
+        """Fetch videos in a collection.
 
         Args:
             quick_check: If True, only fetch first ~30 videos (for checking if new content exists)
         """
         videos = []
         seen_ids = set()
-        cursor = 0
-        has_more = True
-
-        # For quick_check, only fetch first page
-        max_pages = 1 if quick_check else 500
 
         with sync_playwright() as p:
             browser, context = self._create_context(p)
             page = context.new_page()
 
-            try:
-                # Navigate to TikTok to establish session
-                page.goto("https://www.tiktok.com/", wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(3000)
-
-                page_num = 0
-                while has_more and page_num < max_pages:
-                    page_num += 1
-
+            def handle_response(response):
+                if "collection/item_list" in response.url or "collect/item_list" in response.url:
                     try:
-                        # Retry logic for transient failures
-                        response_data = None
-                        for attempt in range(3):
-                            response_data = page.evaluate("""
-                                async ([collectionId, cursor]) => {
-                                    const url = new URL('https://www.tiktok.com/api/collection/item_list/');
-                                    url.searchParams.set('aid', '1988');
-                                    url.searchParams.set('collectionId', collectionId);
-                                    url.searchParams.set('count', '30');
-                                    url.searchParams.set('cursor', cursor.toString());
-                                    url.searchParams.set('sourceType', '113');
-                                    url.searchParams.set('device_platform', 'web_pc');
-                                    url.searchParams.set('app_name', 'tiktok_web');
-                                    url.searchParams.set('channel', 'tiktok_web');
-                                    url.searchParams.set('app_language', 'en');
-                                    url.searchParams.set('language', 'en');
-                                    url.searchParams.set('region', 'US');
-                                    url.searchParams.set('priority_region', 'US');
-                                    url.searchParams.set('os', 'windows');
+                        data = response.json()
+                        if "itemList" in data:
+                            new_count = 0
+                            for item in data["itemList"]:
+                                vid_id = item.get("id")
+                                if vid_id and vid_id not in seen_ids:
+                                    seen_ids.add(vid_id)
+                                    videos.append(item)
+                                    new_count += 1
+                            if new_count > 0:
+                                logger.info(f"    [{collection_name}] Loaded {len(videos)} videos...")
+                    except Exception:
+                        pass
 
-                                    try {
-                                        const response = await fetch(url.toString(), {
-                                            method: 'GET',
-                                            credentials: 'include',
-                                            headers: { 'Accept': 'application/json' }
-                                        });
-                                        const text = await response.text();
-                                        try {
-                                            return JSON.parse(text);
-                                        } catch (e) {
-                                            return { error: 'JSON parse error', textLength: text.length };
-                                        }
-                                    } catch (e) {
-                                        return { error: e.toString() };
-                                    }
-                                }
-                            """, [collection_id, cursor])
+            page.on("response", handle_response)
 
-                            if response_data and 'error' not in response_data:
-                                break
-                            if attempt < 2:
-                                page.wait_for_timeout(1000)  # Wait before retry
+            url = f"https://www.tiktok.com/@me/collection/{collection_name}-{collection_id}"
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                # Wait longer for the video grid to load before scrolling
+                page.wait_for_timeout(5000)
 
-                        if not response_data or 'error' in response_data:
-                            logger.warning(f"    [{collection_name}] API error after retries: {response_data.get('error', 'unknown')}")
-                            break
-
-                        status_code = response_data.get("status_code") or response_data.get("statusCode", -1)
-                        if status_code != 0:
-                            logger.warning(f"    [{collection_name}] API status {status_code}: {response_data.get('status_msg', 'unknown')}")
-                            break
-
-                        item_list = response_data.get("itemList", [])
-                        for item in item_list:
-                            vid_id = item.get("id")
-                            if vid_id and vid_id not in seen_ids:
-                                seen_ids.add(vid_id)
-                                videos.append(item)
-
-                        if not quick_check and len(item_list) > 0:
-                            logger.info(f"    [{collection_name}] Loaded {len(videos)} videos...")
-
-                        has_more = response_data.get("hasMore", False)
-                        if has_more:
-                            new_cursor = response_data.get("cursor")
-                            cursor = int(new_cursor) if new_cursor else cursor + 30
-                        else:
-                            if not quick_check:
-                                logger.info(f"    [{collection_name}] Fetched all {len(videos)} videos")
-
-                        if limit and len(videos) >= limit:
-                            break
-
-                    except Exception as e:
-                        logger.warning(f"    [{collection_name}] API call error: {e}")
-                        break
-
-                    page.wait_for_timeout(300)  # Small delay between API calls
-
-                if quick_check:
-                    logger.info(f"    [{collection_name}] Quick check: got {len(videos)} videos")
-
+                # Try to wait for video grid to appear
+                try:
+                    page.wait_for_selector('[data-e2e="user-post-item"], [class*="DivItemContainer"]', timeout=10000)
+                    logger.info(f"    [{collection_name}] Video grid loaded")
+                except Exception:
+                    logger.warning(f"    [{collection_name}] Video grid not found, page may not have loaded correctly")
             except Exception as e:
-                logger.warning(f"  [{collection_name}] Session error: {e}")
+                logger.warning(f"  [{collection_name}] Navigation issue: {e}")
+
+            # Scroll to load videos - quick_check only does minimal scrolling
+            scroll_count = 0
+            max_scrolls = 3 if quick_check else 500  # quick_check: ~30 videos, full: ~10,000+
+            last_height = 0
+
+            try:
+                while scroll_count < max_scrolls:
+                    prev_count = len(videos)
+
+                    # Scroll to bottom
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(2000)
+                    scroll_count += 1
+
+                    # Check if page height changed (true indicator of more content)
+                    current_height = page.evaluate("document.body.scrollHeight")
+
+                    if len(videos) == prev_count and current_height == last_height:
+                        # No new videos AND page didn't grow - try a few more times
+                        page.wait_for_timeout(1000)
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        page.wait_for_timeout(2000)
+                        final_height = page.evaluate("document.body.scrollHeight")
+
+                        if final_height == current_height and len(videos) == prev_count:
+                            logger.info(f"    [{collection_name}] Reached bottom at {len(videos)} videos")
+                            break
+
+                    last_height = current_height
+
+                    if limit and len(videos) >= limit:
+                        break
+            except Exception as e:
+                # Keep whatever videos we captured even if scrolling fails
+                logger.warning(f"    [{collection_name}] Scrolling error (keeping {len(videos)} videos): {e}")
 
             browser.close()
 

@@ -181,12 +181,14 @@ class TestVideoDownloader(TestCase):
     def test_saves_caption_on_success(self):
         """download should save caption.txt on successful download."""
         video_dir = Path(self.temp_dir) / "Test" / "vid123"
-        video_dir.mkdir(parents=True, exist_ok=True)
         video_file = video_dir / "vid123.mp4"
-        video_file.touch()
 
-        with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=0, stderr="")
+        def create_video_file(*args, **kwargs):
+            video_dir.mkdir(parents=True, exist_ok=True)
+            video_file.touch()
+            return mock.Mock(returncode=0, stderr="")
+
+        with mock.patch("subprocess.run", side_effect=create_video_file):
             self.downloader.download("vid123", "author", "Test", "This is a caption")
 
         caption_file = video_dir / "caption.txt"
@@ -196,23 +198,42 @@ class TestVideoDownloader(TestCase):
     def test_returns_path_on_success(self):
         """download should return video path on success."""
         video_dir = Path(self.temp_dir) / "Test" / "vid123"
+        video_file = video_dir / "vid123.mp4"
+
+        def create_video_file(*args, **kwargs):
+            video_dir.mkdir(parents=True, exist_ok=True)
+            video_file.touch()
+            return mock.Mock(returncode=0, stderr="")
+
+        with mock.patch("subprocess.run", side_effect=create_video_file):
+            result, was_skipped = self.downloader.download("vid123", "author", "Test", "")
+
+        self.assertEqual(result, str(video_file))
+        self.assertFalse(was_skipped)
+
+    def test_returns_none_on_failure(self):
+        """download should return (None, False) on failure."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=1, stderr="Error")
+            result, was_skipped = self.downloader.download("vid123", "author", "Test", "")
+
+        self.assertIsNone(result)
+        self.assertFalse(was_skipped)
+
+    def test_skips_existing_video(self):
+        """download should skip if video already exists on disk."""
+        video_dir = Path(self.temp_dir) / "Test" / "vid123"
         video_dir.mkdir(parents=True, exist_ok=True)
         video_file = video_dir / "vid123.mp4"
         video_file.touch()
 
         with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=0, stderr="")
-            result = self.downloader.download("vid123", "author", "Test", "")
+            result, was_skipped = self.downloader.download("vid123", "author", "Test", "")
 
+        # subprocess.run should NOT be called since file exists
+        mock_run.assert_not_called()
         self.assertEqual(result, str(video_file))
-
-    def test_returns_none_on_failure(self):
-        """download should return None on failure."""
-        with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=1, stderr="Error")
-            result = self.downloader.download("vid123", "author", "Test", "")
-
-        self.assertIsNone(result)
+        self.assertTrue(was_skipped)
 
 
 class TestLoadConfig(TestCase):
