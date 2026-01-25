@@ -9,9 +9,12 @@ This tool uses your TikTok session cookies to access your personal collections (
 ## Features
 
 - [x] List all your TikTok collections
-- [ ] Download videos from collections
-- [ ] Save metadata (captions, author info, stats)
-- [ ] Organize into folders by collection name
+- [x] Download videos from collections
+- [x] Save metadata (captions, author info, stats)
+- [x] Organize into folders by collection name
+- [x] Monitor for new videos (watch mode)
+- [x] Download queue with state persistence
+- [x] Web viewer to browse downloaded videos
 
 ## Setup
 
@@ -62,6 +65,147 @@ python tiktok_collections.py
 ```
 
 This will display all your collections with their IDs and video counts.
+
+### Monitor & Download
+
+The main script `tiktok_monitor.py` handles syncing, downloading, and monitoring:
+
+```bash
+# Sync collections and videos, then download all
+python tiktok_monitor.py
+
+# Just sync (fetch collections and videos, update queue)
+python tiktok_monitor.py --sync
+
+# Just download (process the download queue)
+python tiktok_monitor.py --download
+
+# Watch mode - sync and download every N minutes
+python tiktok_monitor.py --watch --interval 60
+
+# Check current status
+python tiktok_monitor.py --status
+```
+
+#### Options
+
+| Option | Description |
+|--------|-------------|
+| `--sync` | Fetch collections and videos, update download queue |
+| `--download` | Process pending downloads |
+| `--watch` | Run sync + download periodically |
+| `--status` | Show current sync/download status |
+| `--interval, -i` | Watch interval in minutes (default: 60) |
+| `--limit, -l` | Limit downloads per run |
+| `--collection-limit` | Limit collections to sync |
+| `--video-limit` | Limit videos per collection |
+
+#### Examples
+
+```bash
+# Download first 10 videos only
+python tiktok_monitor.py --download --limit 10
+
+# Sync only the first 2 collections, 50 videos each
+python tiktok_monitor.py --sync --collection-limit 2 --video-limit 50
+
+# Monitor every 30 minutes
+python tiktok_monitor.py --watch -i 30
+```
+
+### Web Viewer
+
+Browse your downloaded videos with the web viewer:
+
+```bash
+python viewer.py
+```
+
+Open http://localhost:8080 in your browser to:
+- Browse collections
+- Watch videos with metadata displayed
+- See download status
+
+### Run Tests
+
+```bash
+python -m unittest tests.test_monitor -v
+```
+
+## Docker
+
+Run both the downloader and web viewer together using Docker:
+
+### Quick Start
+
+```bash
+# Build and run
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
+```
+
+### Configuration
+
+Create a `.env` file or set environment variables:
+
+```bash
+# Path to your downloads directory
+DOWNLOAD_DIR=/path/to/your/downloads
+
+# Sync interval in minutes (default: 60)
+SYNC_INTERVAL=30
+```
+
+### docker-compose.yml
+
+```yaml
+version: '3.8'
+
+services:
+  tiktok-downloader:
+    build: .
+    container_name: tiktok-collections
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.json:/app/config/config.json:ro
+      - ${DOWNLOAD_DIR:-./downloads}:/app/downloads
+    environment:
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-60}
+```
+
+The container will:
+- Start the web viewer on port 8080
+- Run the monitor in watch mode (sync + download periodically)
+- Store all data in the mounted downloads directory
+
+### Manual Docker Commands
+
+```bash
+# Build image
+docker build -t tiktok-collections .
+
+# Run with custom settings
+docker run -d \
+  -p 8080:8080 \
+  -v $(pwd)/config.json:/app/config/config.json:ro \
+  -v /path/to/downloads:/app/downloads \
+  -e SYNC_INTERVAL=30 \
+  --name tiktok-collections \
+  tiktok-collections
+
+# Run one-off sync
+docker run --rm \
+  -v $(pwd)/config.json:/app/config/config.json:ro \
+  -v /path/to/downloads:/app/downloads \
+  tiktok-collections python tiktok_monitor.py --sync
+```
 
 ## How It Works
 

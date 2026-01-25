@@ -142,6 +142,7 @@ celerybeat.pid
 # Project-specific secrets
 config.json
 collections.json
+video_cache.json
 downloads/
 env/
 venv/

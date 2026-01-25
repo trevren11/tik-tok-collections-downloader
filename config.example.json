@@ -8,5 +8,6 @@
     "tt_chain_token": "",
     "tt_csrf_token": "",
     "msToken": ""
-  }
+  },
+  "download_dir": "./downloads"
 }

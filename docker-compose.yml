@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  tiktok-downloader:
+    build: .
+    container_name: tiktok-collections
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount your config file
+      - ./config.json:/app/config/config.json:ro
+      # Mount your downloads directory
+      - ${DOWNLOAD_DIR:-./downloads}:/app/downloads
+    environment:
+      # Sync interval in minutes (default: 60)
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-60}
+    # Uncomment to run specific commands instead of watch mode:
+    # command: ["python", "tiktok_monitor.py", "--sync"]
