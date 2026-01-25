@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TikTok Collections Viewer</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #fff;
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: #1a1a1a;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+        }
+        .sidebar-header h1 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+        .status {
+            font-size: 12px;
+            color: #888;
+        }
+        .status span { margin-right: 10px; }
+        .status .downloaded { color: #5cb85c; }
+        .status .pending { color: #f0ad4e; }
+        .status .deleted { color: #d9534f; }
+
+        .collections-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .collection-item {
+            padding: 12px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 5px;
+            transition: background 0.2s;
+        }
+        .collection-item:hover { background: #2a2a2a; }
+        .collection-item.active { background: #fe2c55; }
+        .collection-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        .collection-stats {
+            font-size: 12px;
+            color: #888;
+        }
+        .collection-item.active .collection-stats { color: #ffb8c5; }
+
+        /* Main content */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .videos-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .videos-header h2 { font-size: 16px; }
+        .filter-buttons button, .view-buttons button {
+            background: #2a2a2a;
+            border: none;
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+        .filter-buttons button.active, .view-buttons button.active { background: #fe2c55; }
+        .view-buttons { margin-left: 20px; }
+        .view-buttons button { font-size: 14px; padding: 6px 10px; }
+        .search-box {
+            padding: 8px 12px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 14px;
+            width: 200px;
+        }
+        .search-box:focus {
+            outline: none;
+            border-color: #fe2c55;
+        }
+
+        /* Grid container */
+        .videos-grid {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-content: flex-start;
+        }
+
+        /* Video card */
+        .video-card {
+            background: #1a1a1a;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            width: 200px;
+            flex-shrink: 0;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .video-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+        }
+        .video-card.not-downloaded { opacity: 0.5; }
+        .video-card.deleted { border: 2px solid #d9534f; }
+        .video-card.deleted .video-info::after {
+            content: "DELETED FROM TIKTOK";
+            display: block;
+            color: #d9534f;
+            font-size: 10px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+
+        /* Video/thumbnail area */
+        .video-container {
+            width: 100%;
+            height: 355px;
+            background: #2a2a2a;
+            overflow: hidden;
+            position: relative;
+        }
+        .video-thumbnail {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 12px;
+            background: #2a2a2a;
+        }
+        .video-card video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .play-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 50px;
+            height: 50px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .video-card:hover .play-overlay { opacity: 1; }
+        .play-overlay::after {
+            content: "";
+            border-left: 18px solid white;
+            border-top: 10px solid transparent;
+            border-bottom: 10px solid transparent;
+            margin-left: 4px;
+        }
+
+        /* SMALL GRID */
+        .videos-grid.view-small .video-card { width: 140px; }
+        .videos-grid.view-small .video-container { height: 249px; }
+        .videos-grid.view-small .video-info { padding: 8px; }
+        .videos-grid.view-small .video-author { font-size: 11px; }
+        .videos-grid.view-small .video-desc { font-size: 10px; -webkit-line-clamp: 1; }
+
+        /* LARGE GRID */
+        .videos-grid.view-large .video-card { width: 280px; }
+        .videos-grid.view-large .video-container { height: 498px; }
+        .videos-grid.view-large .video-info { padding: 14px; }
+        .videos-grid.view-large .video-author { font-size: 14px; }
+        .videos-grid.view-large .video-desc { font-size: 13px; -webkit-line-clamp: 3; }
+
+        /* LIST VIEW */
+        .videos-grid.view-list {
+            flex-direction: column;
+            flex-wrap: nowrap;
+            gap: 8px;
+        }
+        .videos-grid.view-list .video-card {
+            width: 100%;
+            display: flex;
+            flex-direction: row;
+        }
+        .videos-grid.view-list .video-card:hover {
+            transform: none;
+            background: #252525;
+        }
+        .videos-grid.view-list .video-container {
+            width: 80px;
+            height: 142px;
+            flex-shrink: 0;
+        }
+        .videos-grid.view-list .video-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 12px 16px;
+        }
+        .videos-grid.view-list .video-author {
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+        .videos-grid.view-list .video-desc {
+            font-size: 13px;
+            -webkit-line-clamp: 2;
+        }
+
+        .video-info {
+            padding: 10px;
+        }
+        .video-author {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .video-desc {
+            font-size: 12px;
+            color: #ccc;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* Video modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 1000;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        .modal-video {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            position: relative;
+        }
+        .modal-video video {
+            max-height: 100%;
+            max-width: 100%;
+        }
+        .modal-sidebar {
+            width: 350px;
+            background: #1a1a1a;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 380px;
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 30px;
+            cursor: pointer;
+            z-index: 1001;
+        }
+        .modal-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: #fff;
+            font-size: 40px;
+            cursor: pointer;
+            padding: 20px 15px;
+            z-index: 1001;
+            transition: background 0.2s;
+        }
+        .modal-nav:hover { background: rgba(255,255,255,0.2); }
+        .modal-nav.prev { left: 20px; }
+        .modal-nav.next { right: 370px; }
+        .modal-author {
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+        .modal-author a {
+            color: #fe2c55;
+            text-decoration: none;
+        }
+        .modal-collection {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .modal-caption {
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            margin-bottom: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .modal-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .stat {
+            text-align: center;
+            padding: 10px;
+            background: #2a2a2a;
+            border-radius: 8px;
+        }
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .stat-label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 4px;
+        }
+        .modal-link {
+            display: block;
+            background: #fe2c55;
+            color: #fff;
+            text-align: center;
+            padding: 12px;
+            border-radius: 8px;
+            text-decoration: none;
+            margin-top: 20px;
+        }
+        .modal-link:hover { background: #e02850; }
+        .modal-path {
+            font-size: 11px;
+            color: #666;
+            background: #0f0f0f;
+            padding: 8px 10px;
+            border-radius: 4px;
+            margin-top: 15px;
+            word-break: break-all;
+            font-family: monospace;
+        }
+        .modal-path-label {
+            color: #888;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+            width: 100%;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #888;
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .sidebar {
+                width: 100%;
+                max-height: 40vh;
+                border-right: none;
+                border-bottom: 1px solid #333;
+            }
+            .modal-content { flex-direction: column; }
+            .modal-sidebar { width: 100%; height: 50%; }
+            .modal-close { right: 20px; top: 10px; }
+            .modal-nav.next { right: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1>TikTok Collections</h1>
+            <div class="status" id="status"></div>
+        </div>
+        <div class="collections-list" id="collections">
+            <div class="loading">Loading...</div>
+        </div>
+    </aside>
+
+    <main class="main">
+        <div class="videos-header">
+            <h2 id="current-collection">All Videos</h2>
+            <input type="text" class="search-box" id="search" placeholder="Search videos...">
+            <div style="display: flex; align-items: center;">
+                <div class="filter-buttons">
+                    <button id="filter-all" class="active">All</button>
+                    <button id="filter-downloaded">Downloaded</button>
+                    <button id="filter-pending">Pending</button>
+                    <button id="filter-deleted">Deleted</button>
+                </div>
+                <div class="view-buttons">
+                    <button id="view-list" title="List view">&#9776;</button>
+                    <button id="view-small" title="Small grid">&#9642;&#9642;</button>
+                    <button id="view-medium" class="active" title="Medium grid">&#9724;&#9724;</button>
+                    <button id="view-large" title="Large grid">&#11036;</button>
+                </div>
+            </div>
+        </div>
+        <div class="videos-grid" id="videos">
+            <div class="loading">Loading videos...</div>
+        </div>
+    </main>
+
+    <div class="modal" id="modal">
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+        <button class="modal-nav prev" onclick="navigateVideo(-1)">&#8249;</button>
+        <button class="modal-nav next" onclick="navigateVideo(1)">&#8250;</button>
+        <div class="modal-content">
+            <div class="modal-video">
+                <video id="modal-video" controls></video>
+            </div>
+            <div class="modal-sidebar">
+                <div class="modal-author" id="modal-author"></div>
+                <div class="modal-collection" id="modal-collection"></div>
+                <div class="modal-caption" id="modal-caption"></div>
+                <div class="modal-stats" id="modal-stats"></div>
+                <a class="modal-link" id="modal-link" href="#" target="_blank">View on TikTok</a>
+                <div class="modal-path" id="modal-path"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load data from data.js (generated by tiktok_monitor.py) -->
+    <script src="data.js"></script>
+    <script>
+        // Data is loaded from data.js as window.collectionsData and window.videosData
+        let collectionsList = [];
+        let videosList = [];
+        let currentCollection = null;
+        let currentFilter = 'all';
+        let currentVideoIndex = -1;
+        let currentView = 'medium';
+        let searchQuery = '';
+        let filteredVideos = [];
+
+        function init() {
+            // Check if data was loaded
+            if (typeof window.collectionsData === 'undefined' || typeof window.videosData === 'undefined') {
+                document.getElementById('collections').innerHTML =
+                    '<div class="empty-state">Error: data.js not found.<br><br>Run tiktok_monitor.py to generate it.</div>';
+                document.getElementById('videos').innerHTML =
+                    '<div class="empty-state">No data loaded.</div>';
+                return;
+            }
+
+            // Process collections - use TikTok's reported total and disk counts
+            const diskCounts = window.diskCounts || {};
+            collectionsList = [];
+            for (const [collId, coll] of Object.entries(window.collectionsData)) {
+                const collName = coll.name || 'Unknown';
+                // Sanitize name to match folder name on disk
+                const safeName = collName.replace(/[^a-zA-Z0-9 \-_]/g, '_');
+                // Use disk count for downloaded, TikTok's reported total for total
+                const downloaded = diskCounts[safeName] || 0;
+                const total = parseInt(coll.total) || 0;
+                collectionsList.push({
+                    id: collId,
+                    name: collName,
+                    total: total,  // TikTok's reported total
+                    downloaded: downloaded,  // Actual files on disk
+                });
+            }
+            collectionsList.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+            // Process videos
+            videosList = [];
+            for (const [vidId, vid] of Object.entries(window.videosData)) {
+                const videoPath = getVideoPath(vid);
+                videosList.push({
+                    id: vidId,
+                    author: vid.author || 'unknown',
+                    desc: vid.desc || '',
+                    collection_id: vid.collection_id,
+                    collection_name: vid.collection_name || 'Unknown',
+                    url: vid.url,
+                    downloaded: vid.downloaded || false,
+                    video_path: videoPath,
+                    stats: vid.stats || {},
+                    create_time: vid.create_time,
+                    deleted_from_tiktok: vid.deleted_from_tiktok || false,
+                });
+            }
+            videosList.sort((a, b) => (b.create_time || 0) - (a.create_time || 0));
+
+            renderStatus();
+            renderCollections();
+            renderVideos();
+            setupEventListeners();
+        }
+
+        function getVideoPath(video) {
+            const downloadPath = video.download_path;
+            if (!downloadPath) return null;
+            const parts = downloadPath.split('/');
+            if (parts.length >= 3) {
+                return parts.slice(-3).join('/');
+            }
+            return null;
+        }
+
+        function renderStatus() {
+            // Use disk counts for accurate downloaded number
+            const diskCounts = window.diskCounts || {};
+            const downloaded = diskCounts._total || 0;
+            const totalFromTikTok = collectionsList.reduce((sum, c) => sum + c.total, 0);
+            const deleted = videosList.filter(v => v.deleted_from_tiktok).length;
+
+            document.getElementById('status').innerHTML = `
+                <span class="downloaded">${downloaded} downloaded</span>
+                <span class="pending">${totalFromTikTok - downloaded} remaining</span>
+                ${deleted ? `<span class="deleted">${deleted} deleted</span>` : ''}
+            `;
+        }
+
+        function renderCollections() {
+            const container = document.getElementById('collections');
+            const diskCounts = window.diskCounts || {};
+            const totalDownloaded = diskCounts._total || 0;
+            const totalFromTikTok = collectionsList.reduce((sum, c) => sum + c.total, 0);
+
+            let html = `
+                <div class="collection-item ${!currentCollection ? 'active' : ''}" data-id="">
+                    <div class="collection-name">All Videos</div>
+                    <div class="collection-stats">${totalDownloaded}/${totalFromTikTok} downloaded</div>
+                </div>
+            `;
+
+            for (const coll of collectionsList) {
+                const isActive = currentCollection === coll.id;
+                html += `
+                    <div class="collection-item ${isActive ? 'active' : ''}" data-id="${coll.id}">
+                        <div class="collection-name">${escapeHtml(coll.name)}</div>
+                        <div class="collection-stats">${coll.downloaded}/${coll.total} downloaded</div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+
+            container.querySelectorAll('.collection-item').forEach(item => {
+                item.onclick = () => selectCollection(item.dataset.id || null);
+            });
+        }
+
+        function renderVideos() {
+            const container = document.getElementById('videos');
+
+            filteredVideos = videosList.slice();
+
+            if (currentCollection) {
+                filteredVideos = filteredVideos.filter(v => v.collection_id === currentCollection);
+                const coll = collectionsList.find(c => c.id === currentCollection);
+                document.getElementById('current-collection').textContent = coll ? coll.name : 'Videos';
+            } else {
+                document.getElementById('current-collection').textContent = 'All Videos';
+            }
+
+            if (currentFilter === 'downloaded') {
+                filteredVideos = filteredVideos.filter(v => v.downloaded);
+            } else if (currentFilter === 'pending') {
+                filteredVideos = filteredVideos.filter(v => !v.downloaded && !v.deleted_from_tiktok);
+            } else if (currentFilter === 'deleted') {
+                filteredVideos = filteredVideos.filter(v => v.deleted_from_tiktok);
+            }
+
+            if (searchQuery) {
+                const query = searchQuery.toLowerCase();
+                filteredVideos = filteredVideos.filter(v =>
+                    (v.desc || '').toLowerCase().includes(query) ||
+                    (v.author || '').toLowerCase().includes(query) ||
+                    (v.collection_name || '').toLowerCase().includes(query)
+                );
+            }
+
+            if (filteredVideos.length === 0) {
+                container.innerHTML = '<div class="empty-state">No videos found</div>';
+                return;
+            }
+
+            let html = '';
+            filteredVideos.forEach((video, index) => {
+                const classes = ['video-card'];
+                if (!video.downloaded) classes.push('not-downloaded');
+                if (video.deleted_from_tiktok) classes.push('deleted');
+
+                html += `
+                    <div class="${classes.join(' ')}" data-index="${index}">
+                        <div class="video-container">
+                            ${video.video_path ?
+                                `<video src="${encodeVideoPath(video.video_path)}" muted playsinline preload="metadata"
+                                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                                ></video>
+                                <div class="video-thumbnail" style="display:none;">Failed to load</div>
+                                <div class="play-overlay"></div>` :
+                                `<div class="video-thumbnail">Not downloaded</div>`
+                            }
+                        </div>
+                        <div class="video-info">
+                            <div class="video-author">@${escapeHtml(video.author)}</div>
+                            <div class="video-desc">${escapeHtml(video.desc || 'No caption')}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+
+            container.querySelectorAll('.video-card').forEach(card => {
+                card.onclick = () => openModal(parseInt(card.dataset.index));
+            });
+        }
+
+        function selectCollection(id) {
+            currentCollection = id;
+            renderCollections();
+            renderVideos();
+        }
+
+        function setFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-buttons button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`filter-${filter}`).classList.add('active');
+            renderVideos();
+        }
+
+        function encodeVideoPath(path) {
+            return path.split('/').map(p => encodeURIComponent(p)).join('/');
+        }
+
+        function openModal(index) {
+            if (index < 0 || index >= filteredVideos.length) return;
+
+            currentVideoIndex = index;
+            const video = filteredVideos[index];
+            const modal = document.getElementById('modal');
+            const modalVideo = document.getElementById('modal-video');
+
+            if (video.video_path) {
+                modalVideo.src = encodeVideoPath(video.video_path);
+                modalVideo.style.display = 'block';
+            } else {
+                modalVideo.src = '';
+                modalVideo.style.display = 'none';
+            }
+
+            document.getElementById('modal-author').innerHTML =
+                `<a href="https://www.tiktok.com/@${video.author}" target="_blank">@${escapeHtml(video.author)}</a>`;
+            document.getElementById('modal-collection').textContent =
+                `Collection: ${escapeHtml(video.collection_name)}`;
+            document.getElementById('modal-caption').textContent = video.desc || 'No caption';
+            document.getElementById('modal-link').href = video.url || '#';
+
+            const stats = video.stats || {};
+            document.getElementById('modal-stats').innerHTML = `
+                <div class="stat">
+                    <div class="stat-value">${formatNumber(stats.playCount || 0)}</div>
+                    <div class="stat-label">Views</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">${formatNumber(stats.diggCount || 0)}</div>
+                    <div class="stat-label">Likes</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">${formatNumber(stats.commentCount || 0)}</div>
+                    <div class="stat-label">Comments</div>
+                </div>
+            `;
+
+            const pathEl = document.getElementById('modal-path');
+            if (video.video_path) {
+                pathEl.innerHTML = `<span class="modal-path-label">File:</span>${escapeHtml(video.video_path)}`;
+                pathEl.style.display = 'block';
+            } else {
+                pathEl.style.display = 'none';
+            }
+
+            modal.classList.add('active');
+            if (video.video_path) {
+                modalVideo.play().catch(() => {});
+            }
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('modal');
+            const modalVideo = document.getElementById('modal-video');
+            modalVideo.pause();
+            modalVideo.src = '';
+            modal.classList.remove('active');
+            currentVideoIndex = -1;
+        }
+
+        function navigateVideo(direction) {
+            const newIndex = currentVideoIndex + direction;
+            if (newIndex >= 0 && newIndex < filteredVideos.length) {
+                openModal(newIndex);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
+        function setView(view) {
+            currentView = view;
+            const grid = document.getElementById('videos');
+            grid.classList.remove('view-list', 'view-small', 'view-large');
+            if (view !== 'medium') {
+                grid.classList.add('view-' + view);
+            }
+            document.querySelectorAll('.view-buttons button').forEach(b => b.classList.remove('active'));
+            document.getElementById('view-' + view).classList.add('active');
+        }
+
+        function setupEventListeners() {
+            document.getElementById('filter-all').onclick = () => setFilter('all');
+            document.getElementById('filter-downloaded').onclick = () => setFilter('downloaded');
+            document.getElementById('filter-pending').onclick = () => setFilter('pending');
+            document.getElementById('filter-deleted').onclick = () => setFilter('deleted');
+
+            document.getElementById('view-list').onclick = () => setView('list');
+            document.getElementById('view-small').onclick = () => setView('small');
+            document.getElementById('view-medium').onclick = () => setView('medium');
+            document.getElementById('view-large').onclick = () => setView('large');
+
+            let searchTimeout;
+            document.getElementById('search').oninput = (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    searchQuery = e.target.value;
+                    renderVideos();
+                }, 300);
+            };
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closeModal();
+                if (document.getElementById('modal').classList.contains('active')) {
+                    if (e.key === 'ArrowLeft') navigateVideo(-1);
+                    if (e.key === 'ArrowRight') navigateVideo(1);
+                }
+            });
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+</html>

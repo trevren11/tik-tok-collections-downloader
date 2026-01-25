@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium && playwright install-deps chromium
 
 # Copy application code
-COPY *.py ./
+COPY tiktok_monitor.py tiktok_collections.py viewer.html ./
 COPY tests/ ./tests/
 
 # Create volume mount points
@@ -25,7 +25,5 @@ VOLUME ["/app/config", "/app/downloads"]
 # Default command runs the entrypoint script
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
-
-EXPOSE 8080
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
