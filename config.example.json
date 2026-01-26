@@ -3,5 +3,7 @@
   "sessionid": "YOUR_SESSIONID_HERE",
   "download_dir": "./downloads",
   "exclude_collections": [],
-  "_exclude_collections_comment": "Array of collection names or IDs to skip. See available_collections.json in your download_dir for reference."
+  "_exclude_collections_comment": "Array of collection names or IDs to skip. See available_collections.json in your download_dir for reference.",
+  "max_parallel": 3,
+  "_max_parallel_comment": "Number of parallel downloads (default: 3). Rate limiting is automatic with exponential backoff."
 }
