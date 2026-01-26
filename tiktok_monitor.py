@@ -45,11 +45,18 @@ class DataStore:
         self._save_lock = threading.Lock()  # Prevent concurrent file writes
         self._queue_lock = threading.Lock()  # Protect queue operations for concurrent access
 
-        self.collections_file = self.data_dir / "collections.json"
-        self.videos_file = self.data_dir / "videos.json"
-        self.queue_file = self.data_dir / "download_queue.json"
-        self.data_js_file = self.data_dir / "data.js"
-        self.viewer_file = self.data_dir / "viewer.html"
+        # Create json subfolder for metadata files
+        self.json_dir = self.data_dir / "json"
+        self.json_dir.mkdir(parents=True, exist_ok=True)
+
+        self.collections_file = self.json_dir / "collections.json"
+        self.videos_file = self.json_dir / "videos.json"
+        self.queue_file = self.json_dir / "download_queue.json"
+        self.data_js_file = self.json_dir / "data.js"
+        self.viewer_file = self.json_dir / "viewer.html"
+
+        # Migrate existing files from root to json/ folder
+        self._migrate_to_json_folder()
 
         self._corruption_detected = False
         self.collections = self._load(self.collections_file, {})
@@ -80,6 +87,29 @@ class DataStore:
                 return default
         return default
 
+    def _migrate_to_json_folder(self):
+        """Migrate existing JSON files from data_dir root to json/ subfolder."""
+        import shutil
+
+        files_to_migrate = [
+            ("collections.json", self.collections_file),
+            ("videos.json", self.videos_file),
+            ("download_queue.json", self.queue_file),
+            ("available_collections.json", self.json_dir / "available_collections.json"),
+            ("data.js", self.data_js_file),
+            ("viewer.html", self.viewer_file),
+        ]
+
+        migrated = []
+        for old_name, new_path in files_to_migrate:
+            old_path = self.data_dir / old_name
+            if old_path.exists() and not new_path.exists():
+                shutil.move(str(old_path), str(new_path))
+                migrated.append(old_name)
+
+        if migrated:
+            logger.info(f"Migrated {len(migrated)} file(s) to json/ folder: {', '.join(migrated)}")
+
     def _reconcile_with_disk(self):
         """Scan disk and update download status, clean up incomplete downloads."""
         import shutil
@@ -87,7 +117,7 @@ class DataStore:
         cleaned_count = 0
 
         collection_dirs = [d for d in self.data_dir.iterdir()
-                          if d.is_dir() and not d.name.startswith(".")]
+                          if d.is_dir() and not d.name.startswith(".") and d.name != "json"]
 
         for collection_dir in collection_dirs:
             for video_dir in collection_dir.iterdir():
@@ -175,7 +205,7 @@ class DataStore:
 
     def _write_available_collections(self):
         """Write a reference file listing all available collections for exclusion config."""
-        available_file = self.data_dir / "available_collections.json"
+        available_file = self.json_dir / "available_collections.json"
         collections_list = []
         for coll_id, coll in self.collections.items():
             collections_list.append({
@@ -314,6 +344,18 @@ class DataStore:
         with self._queue_lock:
             return len(self.queue["pending"])
 
+    def get_pending_for_collection(self, collection_name: str) -> list:
+        """Thread-safe get pending downloads for a specific collection."""
+        with self._queue_lock:
+            return [v for v in self.queue["pending"] if v.get("collection") == collection_name]
+
+    def clear_pending_for_collection(self, collection_name: str) -> int:
+        """Thread-safe clear all pending downloads for a specific collection. Returns count cleared."""
+        with self._queue_lock:
+            before = len(self.queue["pending"])
+            self.queue["pending"] = [v for v in self.queue["pending"] if v.get("collection") != collection_name]
+            return before - len(self.queue["pending"])
+
     def delete_video(self, video_id: str) -> Optional[str]:
         """
         Delete a video from tracking and remove its files.
@@ -401,8 +443,8 @@ class DataStore:
         for collection_dir in self.data_dir.iterdir():
             if not collection_dir.is_dir():
                 continue
-            # Skip hidden directories
-            if collection_dir.name.startswith("."):
+            # Skip hidden directories and json metadata folder
+            if collection_dir.name.startswith(".") or collection_dir.name == "json":
                 continue
 
             collection_count = 0
@@ -974,29 +1016,30 @@ class DownloadWorker:
 
     def _handle_download_result(self, video_id: str, video_data: dict, path: Optional[str], was_skipped: bool, error_type: Optional[str]):
         """Handle the result of a download attempt."""
+        collection = video_data.get("collection", "Unknown")
         if was_skipped:
             # Already existed, mark as completed
             if path:
                 self.store.mark_downloaded(video_id, path)
-            logger.info(f"  Skipped (exists): {video_id}")
+            logger.info(f"  [{collection}] Skipped (exists): {video_id}")
         elif error_type == VideoDownloader.ERROR_RATE_LIMITED:
             # Rate limited - requeue for later (add back to end of queue)
             self.downloader.rate_limiter.report_rate_limit()
             self._requeue_with_data(video_data)
-            logger.warning(f"  Rate limited, requeued: {video_id}")
+            logger.warning(f"  [{collection}] Rate limited, requeued: {video_id}")
         elif error_type == VideoDownloader.ERROR_NOT_FOUND:
             # Video not found - mark as failed permanently
             self._mark_failed_with_data(video_data, "Video not found (404)")
-            logger.warning(f"  Not found: {video_id}")
+            logger.warning(f"  [{collection}] Not found: {video_id}")
         elif error_type == VideoDownloader.ERROR_FAILED:
             # Other failure - mark as failed
             self._mark_failed_with_data(video_data, "Download failed")
-            logger.error(f"  Failed: {video_id}")
+            logger.error(f"  [{collection}] Failed: {video_id}")
         elif path:
             # Success
             self.downloader.rate_limiter.report_success()
             self.store.mark_downloaded(video_id, path)
-            logger.info(f"  Downloaded: {video_id}")
+            logger.info(f"  [{collection}] Downloaded: {video_id}")
 
         # Save queue state after each download
         self.store.save_queue()
@@ -1157,27 +1200,34 @@ def load_config(config_path: str = "config.json") -> dict:
         return json.load(f)
 
 
-def _download_collection_videos(store: DataStore, downloader: "VideoDownloader", collection_id: str, max_parallel: int = 3) -> int:
-    """Download pending videos for a specific collection with parallel downloads. Returns count of successful downloads."""
-    pending = [v for v in store.get_pending_downloads() if v.get("collection") == store.collections.get(collection_id, {}).get("name") or (collection_id == "_favorites" and v.get("collection") == "Favorites")]
+def _download_collection_queue(store: DataStore, downloader: "VideoDownloader", collection_name: str, max_parallel: int = 3) -> int:
+    """
+    Download all pending videos for a specific collection.
+    Uses the collection's pending queue, processes until empty.
+    Returns count of successful downloads.
+    """
+    pending = store.get_pending_for_collection(collection_name)
 
     if not pending:
         return 0
 
-    success_count = [0]  # Use list to allow modification in nested scope
-    rate_limited_items = []  # Track items to retry
+    logger.info(f"    Downloading {len(pending)} video(s) from {collection_name}...")
+    success_count = [0]
+    rate_limited_items = []
     lock = threading.Lock()
 
     def download_worker(item, index):
         """Worker function to download a single video."""
         vid_id = item["id"]
         author = item.get("author", "unknown")
-        collection = item.get("collection", "uncategorized")
         desc = item.get("desc", "")
 
-        logger.info(f"    [{index}/{len(pending)}] Downloading {vid_id} (@{author})")
+        # Wait for rate limiter before downloading
+        downloader.rate_limiter.wait_if_needed()
 
-        path, was_skipped, error_type = downloader.download(vid_id, author, collection, desc)
+        logger.info(f"      [{index}/{len(pending)}] Downloading {vid_id} (@{author})")
+
+        path, was_skipped, error_type = downloader.download(vid_id, author, collection_name, desc)
 
         return {
             "vid_id": vid_id,
@@ -1202,25 +1252,25 @@ def _download_collection_videos(store: DataStore, downloader: "VideoDownloader",
                 if result["success"]:
                     store.mark_downloaded(vid_id, result["path"])
                     if result.get("skipped"):
-                        logger.info(f"      Skipped (already on disk): {result['path']}")
+                        logger.info(f"    [{collection_name}] Skipped (exists): {vid_id}")
                     else:
-                        logger.info(f"      Success: {result['path']}")
+                        logger.info(f"    [{collection_name}] Downloaded: {vid_id}")
+                        downloader.rate_limiter.report_success()
                     success_count[0] += 1
                 elif result["error_type"] == VideoDownloader.ERROR_RATE_LIMITED:
-                    # Keep in pending queue for retry later
+                    downloader.rate_limiter.report_rate_limit()
                     rate_limited_items.append(result["item"])
-                    logger.warning(f"      Rate limited: {vid_id} (will retry)")
+                    logger.warning(f"    [{collection_name}] Rate limited: {vid_id} (will retry)")
                 elif result["error_type"] == VideoDownloader.ERROR_NOT_FOUND:
                     store.mark_failed(vid_id, "Video not found (404)")
-                    logger.warning(f"      Not found: {vid_id}")
+                    logger.warning(f"    [{collection_name}] Not found: {vid_id}")
                 else:
                     store.mark_failed(vid_id, "Download failed")
-                    logger.warning(f"      Failed: {vid_id}")
+                    logger.warning(f"    [{collection_name}] Failed: {vid_id}")
 
                 store.save_queue()
                 store.save_videos()
 
-    # Log rate-limited items summary
     if rate_limited_items:
         logger.info(f"    {len(rate_limited_items)} video(s) rate-limited, will retry on next sync")
 
@@ -1364,12 +1414,11 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
         new_videos += new_count
         deleted_count += del_count
 
-        # Download immediately if downloader is provided (parallel downloads still work)
+        # Download immediately if downloader is provided (per-collection processing)
         if downloader and queued_count > 0:
             store.save_videos()
             store.save_queue()
-            logger.info(f"  Downloading {queued_count} new videos from {coll_name}...")
-            downloaded += _download_collection_videos(store, downloader, coll_id, max_parallel)
+            downloaded += _download_collection_queue(store, downloader, coll_name, max_parallel)
 
     # Step 3: Fetch favorited videos (not in any collection)
     logger.info("Fetching favorited videos (not in collections)...")
@@ -1427,8 +1476,7 @@ def cmd_sync(client: TikTokClient, store: DataStore, collection_limit: Optional[
     if downloader and favorites_queued > 0:
         store.save_videos()
         store.save_queue()
-        logger.info(f"  Downloading {favorites_queued} new favorites...")
-        downloaded += _download_collection_videos(store, downloader, "_favorites", max_parallel)
+        downloaded += _download_collection_queue(store, downloader, "Favorites", max_parallel)
 
     store.save_videos()
     store.save_queue()
@@ -1593,8 +1641,8 @@ def cmd_delete(store: DataStore, video_ids: list, delete_all: bool = False):
 
         # Clean up any remaining collection folders in the download directory
         for item in store.data_dir.iterdir():
-            if item.is_dir() and item.name not in [".", ".."]:
-                # Skip if it's not a collection folder (check if it contains video folders)
+            if item.is_dir() and item.name not in [".", "..", "json"]:
+                # Skip json folder (metadata), only delete collection folders
                 try:
                     shutil.rmtree(item)
                     logger.info(f"  Removed folder: {item.name}")

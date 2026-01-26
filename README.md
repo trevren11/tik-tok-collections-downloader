@@ -242,6 +242,99 @@ TikTok stores your collections/favorites server-side and exposes them through in
 3. Fetch video details including captions/descriptions
 4. Download videos with metadata preserved
 
+## Architecture
+
+### Directory Structure
+
+After running the downloader, your data directory will look like:
+
+```
+downloads/
+├── json/                          # Metadata files
+│   ├── collections.json           # Collection metadata
+│   ├── videos.json                # Video metadata
+│   ├── download_queue.json        # Download state (pending/completed/failed)
+│   ├── available_collections.json # Reference for exclude_collections config
+│   ├── data.js                    # Data for web viewer
+│   └── viewer.html                # Web viewer interface
+├── Recipes/                       # Collection folder (sanitized name)
+│   └── 7597399138594065687/       # Video folder (video ID)
+│       ├── 7597399138594065687.mp4
+│       ├── 7597399138594065687.info.json
+│       └── caption.txt
+├── Music/
+│   └── .../
+├── Favorites/                     # Saved videos not assigned to a collection
+│   └── .../
+└── .../
+```
+
+### Processing Flow
+
+The downloader processes each collection completely before moving to the next:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       SYNC MODE                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  1. Fetch all collections from TikTok API                   │
+│                                                              │
+│  2. For each collection:                                    │
+│     ┌──────────────────────────────────────────────────┐   │
+│     │  a. Fetch videos for this collection              │   │
+│     │  b. Queue new videos (collection-specific)        │   │
+│     │  c. Download ALL queued videos for THIS collection│   │
+│     │  d. Move to next collection                       │   │
+│     └──────────────────────────────────────────────────┘   │
+│                                                              │
+│  3. Process favorites (special collection)                  │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+This per-collection approach:
+- Keeps the download queue smaller and more manageable
+- Makes progress more predictable (complete one collection at a time)
+- Reduces memory usage from large JSON files
+
+### Watch Mode
+
+In watch mode, the downloader runs periodically with background processing:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      WATCH MODE                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────────┐    ┌─────────────────────────────┐    │
+│  │  Background     │    │  Main Thread                │    │
+│  │  Download       │◄───┤  Periodic Sync              │    │
+│  │  Worker         │    │  (adds to queue)            │    │
+│  └─────────────────┘    └─────────────────────────────┘    │
+│         │                                                    │
+│         ▼                                                    │
+│  Processes pending queue continuously                       │
+│  (resumes on restart from saved state)                      │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Rate Limiting
+
+Downloads use automatic exponential backoff when rate limited:
+
+- **On 429/530 errors**: Delay doubles (1s → 2s → 4s → ... → 60s max)
+- **On success**: Delay halves (60s → 30s → 15s → ... → 0)
+- **Rate-limited videos**: Stay in queue for automatic retry
+
+### Migration from Previous Versions
+
+If upgrading from a version that stored JSON files in the download root:
+- Files are **automatically migrated** to the `json/` subfolder on first run
+- No manual action required
+- Video files remain in place (only metadata files move)
+
 ## Security Notes
 
 - **Never share your `config.json`** - it contains session credentials
