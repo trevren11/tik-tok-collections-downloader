@@ -107,6 +107,20 @@
             outline: none;
             border-color: #fe2c55;
         }
+        .collection-search {
+            width: calc(100% - 24px);
+            margin: 0 12px 10px 12px;
+            padding: 8px 12px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 13px;
+        }
+        .collection-search:focus {
+            outline: none;
+            border-color: #fe2c55;
+        }
 
         /* Grid container */
         .videos-grid {
@@ -454,6 +468,7 @@
             <h1>TikTok Collections</h1>
             <div class="status" id="status"></div>
         </div>
+        <input type="text" class="collection-search" id="collection-search" placeholder="Filter collections...">
         <div class="collections-list" id="collections">
             <div class="loading">Loading...</div>
         </div>
@@ -462,7 +477,7 @@
     <main class="main">
         <div class="videos-header">
             <h2 id="current-collection">All Videos</h2>
-            <input type="text" class="search-box" id="search" placeholder="Search videos...">
+            <input type="text" class="search-box" id="search" placeholder="Search by ID, author, description...">
             <div style="display: flex; align-items: center;">
                 <div class="filter-buttons">
                     <button id="filter-all" class="active">All</button>
@@ -514,6 +529,7 @@
         let currentVideoIndex = -1;
         let currentView = 'medium';
         let searchQuery = '';
+        let collectionSearchQuery = '';
         let filteredVideos = [];
         let displayedCount = VIDEOS_PER_PAGE;
 
@@ -575,6 +591,7 @@
             renderCollections();
             renderVideos();
             setupEventListeners();
+            updateSearchPlaceholder();
 
             // Apply view from URL hash after setup
             setView(currentView, false);
@@ -585,6 +602,7 @@
                 renderCollections();
                 renderVideos();
                 setView(currentView, false);
+                updateSearchPlaceholder();
             });
         }
 
@@ -593,7 +611,8 @@
             if (!downloadPath) return null;
             const parts = downloadPath.split('/');
             if (parts.length >= 3) {
-                return parts.slice(-3).join('/');
+                // Prefix with ../ since viewer.html is now in json/ folder
+                return '../' + parts.slice(-3).join('/');
             }
             return null;
         }
@@ -607,7 +626,7 @@
             document.getElementById('status').innerHTML = `
                 <span class="downloaded">${downloaded} downloaded</span>
                 <span class="pending">${totalFromTikTok - downloaded} remaining</span>
-                ${deleted ? `<span class="deleted">${deleted} deleted</span>` : ''}
+                <span class="deleted">${deleted} deleted from TikTok</span>
             `;
         }
 
@@ -616,14 +635,40 @@
             const totalDownloaded = collectionsList.reduce((sum, c) => sum + c.downloaded, 0);
             const totalFromTikTok = collectionsList.reduce((sum, c) => sum + c.total, 0);
 
-            let html = `
-                <div class="collection-item ${!currentCollection ? 'active' : ''}" data-id="">
-                    <div class="collection-name">All Videos</div>
-                    <div class="collection-stats">${totalDownloaded}/${totalFromTikTok} downloaded</div>
-                </div>
-            `;
+            // Count uncategorized/favorites videos (saved but not in a collection)
+            const favoritesVideos = videosList.filter(v => v.collection_id === '_favorites');
+            const favoritesDownloaded = favoritesVideos.filter(v => v.downloaded).length;
+            const favoritesTotal = favoritesVideos.length;
 
-            for (const coll of collectionsList) {
+            // Filter collections by search query
+            const query = collectionSearchQuery.toLowerCase();
+            const filteredCollections = query
+                ? collectionsList.filter(c => c.name.toLowerCase().includes(query))
+                : collectionsList;
+
+            let html = '';
+
+            // Always show "All Videos" if no search or if it matches
+            if (!query || 'all videos'.includes(query)) {
+                html += `
+                    <div class="collection-item ${!currentCollection ? 'active' : ''}" data-id="">
+                        <div class="collection-name">All Videos</div>
+                        <div class="collection-stats">${totalDownloaded + favoritesDownloaded}/${totalFromTikTok + favoritesTotal} downloaded</div>
+                    </div>
+                `;
+            }
+
+            // Add Favorites/Uncategorized as a special collection (if matches search)
+            if (favoritesTotal > 0 && (!query || 'favorites uncategorized'.includes(query))) {
+                html += `
+                    <div class="collection-item ${currentCollection === '_favorites' ? 'active' : ''}" data-id="_favorites">
+                        <div class="collection-name">Favorites (Uncategorized)</div>
+                        <div class="collection-stats">${favoritesDownloaded}/${favoritesTotal} downloaded</div>
+                    </div>
+                `;
+            }
+
+            for (const coll of filteredCollections) {
                 const isActive = currentCollection === coll.id;
                 html += `
                     <div class="collection-item ${isActive ? 'active' : ''}" data-id="${coll.id}">
@@ -631,6 +676,10 @@
                         <div class="collection-stats">${coll.downloaded}/${coll.total} downloaded</div>
                     </div>
                 `;
+            }
+
+            if (!html) {
+                html = '<div class="empty-state" style="padding: 20px; text-align: center;">No collections match</div>';
             }
 
             container.innerHTML = html;
@@ -645,8 +694,12 @@
 
             // Update header
             if (currentCollection) {
-                const coll = collectionsList.find(c => c.id === currentCollection);
-                document.getElementById('current-collection').textContent = coll ? coll.name : 'Videos';
+                if (currentCollection === '_favorites') {
+                    document.getElementById('current-collection').textContent = 'Favorites (Uncategorized)';
+                } else {
+                    const coll = collectionsList.find(c => c.id === currentCollection);
+                    document.getElementById('current-collection').textContent = coll ? coll.name : 'Videos';
+                }
             } else {
                 document.getElementById('current-collection').textContent = 'All Videos';
             }
@@ -662,7 +715,8 @@
                     const desc = (v.desc || '').toLowerCase();
                     const author = (v.author || '').toLowerCase();
                     const collName = (v.collection_name || '').toLowerCase();
-                    if (!desc.includes(query) && !author.includes(query) && !collName.includes(query)) {
+                    const videoId = (v.id || '').toLowerCase();
+                    if (!desc.includes(query) && !author.includes(query) && !collName.includes(query) && !videoId.includes(query)) {
                         return false;
                     }
                 }
@@ -682,7 +736,15 @@
             }
 
             if (totalMatches === 0) {
-                container.innerHTML = '<div class="empty-state">No videos found</div>';
+                let emptyMessage = 'No videos found';
+                if (currentFilter === 'deleted') {
+                    emptyMessage = 'No videos deleted from TikTok. Videos appear here when TikTok removes them from their servers.';
+                } else if (currentFilter === 'pending') {
+                    emptyMessage = 'No pending downloads';
+                } else if (currentFilter === 'downloaded') {
+                    emptyMessage = 'No downloaded videos';
+                }
+                container.innerHTML = `<div class="empty-state">${emptyMessage}</div>`;
                 return;
             }
 
@@ -749,6 +811,23 @@
             }
             renderCollections();
             renderVideos();
+            updateSearchPlaceholder();
+        }
+
+        function updateSearchPlaceholder() {
+            const searchBox = document.getElementById('search');
+            if (currentCollection) {
+                let collName;
+                if (currentCollection === '_favorites') {
+                    collName = 'Favorites';
+                } else {
+                    const coll = collectionsList.find(c => c.id === currentCollection);
+                    collName = coll ? coll.name : 'collection';
+                }
+                searchBox.placeholder = `Search in ${collName}...`;
+            } else {
+                searchBox.placeholder = 'Search by ID, author, description...';
+            }
         }
 
         function loadMore() {
@@ -768,6 +847,12 @@
             if (currentView && currentView !== 'medium') {
                 params.set('view', currentView);
             }
+            if (searchQuery) {
+                params.set('search', searchQuery);
+            }
+            if (collectionSearchQuery) {
+                params.set('collectionSearch', collectionSearchQuery);
+            }
             const hash = params.toString();
             window.location.hash = hash ? hash : '';
         }
@@ -785,7 +870,8 @@
             const params = new URLSearchParams(hash);
 
             const collectionId = params.get('collection');
-            if (collectionId && window.collectionsData && window.collectionsData[collectionId]) {
+            // Allow _favorites as a valid collection ID
+            if (collectionId === '_favorites' || (collectionId && window.collectionsData && window.collectionsData[collectionId])) {
                 currentCollection = collectionId;
             } else {
                 currentCollection = null;
@@ -803,6 +889,25 @@
                 currentView = view;
             } else {
                 currentView = 'medium';
+            }
+
+            // Load search queries from URL
+            const search = params.get('search');
+            if (search) {
+                searchQuery = search;
+                const searchInput = document.getElementById('search');
+                if (searchInput) searchInput.value = search;
+            } else {
+                searchQuery = '';
+            }
+
+            const collSearch = params.get('collectionSearch');
+            if (collSearch) {
+                collectionSearchQuery = collSearch;
+                const collSearchInput = document.getElementById('collection-search');
+                if (collSearchInput) collSearchInput.value = collSearch;
+            } else {
+                collectionSearchQuery = '';
             }
 
             // Update filter buttons UI
@@ -938,7 +1043,19 @@
                     searchQuery = e.target.value;
                     displayedCount = VIDEOS_PER_PAGE; // Reset pagination on search
                     renderVideos();
+                    updateUrlHash();
                 }, 300);
+            };
+
+            // Collection search filter
+            let collectionSearchTimeout;
+            document.getElementById('collection-search').oninput = (e) => {
+                clearTimeout(collectionSearchTimeout);
+                collectionSearchTimeout = setTimeout(() => {
+                    collectionSearchQuery = e.target.value;
+                    renderCollections();
+                    updateUrlHash();
+                }, 200);
             };
 
             document.addEventListener('keydown', (e) => {
