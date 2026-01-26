@@ -199,7 +199,10 @@ class DataStore:
             temp_path.replace(path)  # Atomic rename
 
     def _get_disk_only_collections(self) -> dict:
-        """Find collections that exist on disk but not in collections.json (e.g., Uncategorized from imports)."""
+        """Find collections that exist on disk but not in collections.json (e.g., Uncategorized from imports).
+
+        Also adds videos from disk-only collections to self.videos so they appear in the viewer.
+        """
         disk_collections = {}
 
         # Get collection names that exist in self.collections
@@ -216,18 +219,59 @@ class DataStore:
             if collection_dir.name.lower() in existing_names:
                 continue
 
-            # Count videos in this folder
+            # Count videos and add them to videos data
             video_count = 0
+            collection_id = f"_disk_{collection_dir.name.lower()}"
+
             for video_dir in collection_dir.iterdir():
                 if not video_dir.is_dir():
                     continue
+
+                video_id = video_dir.name
+                video_file = None
+
                 for f in video_dir.iterdir():
                     if f.suffix.lower() in [".mp4", ".webm", ".mkv"]:
+                        video_file = f
                         video_count += 1
                         break
 
+                if video_file and video_id not in self.videos:
+                    # Try to load metadata if available
+                    metadata_file = video_dir / "metadata.json"
+                    caption_file = video_dir / "caption.txt"
+
+                    desc = ""
+                    author = "unknown"
+
+                    if metadata_file.exists():
+                        try:
+                            with open(metadata_file) as mf:
+                                metadata = json.load(mf)
+                                desc = metadata.get("original_desc") or metadata.get("title") or ""
+                                author = metadata.get("author", "unknown")
+                        except (json.JSONDecodeError, IOError):
+                            pass
+                    elif caption_file.exists():
+                        try:
+                            with open(caption_file) as cf:
+                                desc = cf.read().strip()[:200]
+                        except IOError:
+                            pass
+
+                    # Add video to videos data
+                    self.videos[video_id] = {
+                        "id": video_id,
+                        "author": author,
+                        "desc": desc,
+                        "collection_id": collection_id,
+                        "collection_name": collection_dir.name,
+                        "downloaded": True,
+                        "download_path": str(video_file),
+                        "disk_only": True,
+                    }
+
             if video_count > 0:
-                collection_id = f"_disk_{collection_dir.name.lower()}"
                 disk_collections[collection_id] = {
                     "id": collection_id,
                     "name": collection_dir.name,
