@@ -206,19 +206,21 @@ class TestVideoDownloader(TestCase):
             return mock.Mock(returncode=0, stderr="")
 
         with mock.patch("subprocess.run", side_effect=create_video_file):
-            result, was_skipped = self.downloader.download("vid123", "author", "Test", "")
+            result, was_skipped, error_type = self.downloader.download("vid123", "author", "Test", "")
 
         self.assertEqual(result, str(video_file))
         self.assertFalse(was_skipped)
+        self.assertIsNone(error_type)
 
     def test_returns_none_on_failure(self):
-        """download should return (None, False) on failure."""
+        """download should return (None, False, error_type) on failure."""
         with mock.patch("subprocess.run") as mock_run:
             mock_run.return_value = mock.Mock(returncode=1, stderr="Error")
-            result, was_skipped = self.downloader.download("vid123", "author", "Test", "")
+            result, was_skipped, error_type = self.downloader.download("vid123", "author", "Test", "")
 
         self.assertIsNone(result)
         self.assertFalse(was_skipped)
+        self.assertEqual(error_type, "failed")
 
     def test_skips_existing_video(self):
         """download should skip if video already exists on disk."""
@@ -228,12 +230,13 @@ class TestVideoDownloader(TestCase):
         video_file.touch()
 
         with mock.patch("subprocess.run") as mock_run:
-            result, was_skipped = self.downloader.download("vid123", "author", "Test", "")
+            result, was_skipped, error_type = self.downloader.download("vid123", "author", "Test", "")
 
         # subprocess.run should NOT be called since file exists
         mock_run.assert_not_called()
         self.assertEqual(result, str(video_file))
         self.assertTrue(was_skipped)
+        self.assertIsNone(error_type)
 
 
 class TestLoadConfig(TestCase):
@@ -1275,6 +1278,401 @@ class TestTikTokClientDirectAPI(TestCase):
 
         # Verify retry logic exists
         self.assertIn("attempt", source.lower())
+
+
+class TestRateLimiter(TestCase):
+    """Tests for the RateLimiter class."""
+
+    def test_initial_state_no_delay(self):
+        """RateLimiter should start with no delay."""
+        from tiktok_monitor import RateLimiter
+        limiter = RateLimiter()
+        self.assertEqual(limiter.get_current_delay(), 0.0)
+
+    def test_report_rate_limit_increases_delay(self):
+        """report_rate_limit should increase the delay."""
+        from tiktok_monitor import RateLimiter
+        limiter = RateLimiter(initial_delay=1.0, backoff_factor=2.0)
+
+        limiter.report_rate_limit()
+        self.assertEqual(limiter.get_current_delay(), 1.0)
+
+        limiter.report_rate_limit()
+        self.assertEqual(limiter.get_current_delay(), 2.0)
+
+        limiter.report_rate_limit()
+        self.assertEqual(limiter.get_current_delay(), 4.0)
+
+    def test_report_rate_limit_respects_max_delay(self):
+        """report_rate_limit should not exceed max_delay."""
+        from tiktok_monitor import RateLimiter
+        limiter = RateLimiter(initial_delay=1.0, max_delay=5.0, backoff_factor=10.0)
+
+        limiter.report_rate_limit()
+        self.assertEqual(limiter.get_current_delay(), 1.0)
+
+        limiter.report_rate_limit()
+        self.assertEqual(limiter.get_current_delay(), 5.0)  # Capped at max
+
+        limiter.report_rate_limit()
+        self.assertEqual(limiter.get_current_delay(), 5.0)  # Still capped
+
+    def test_report_success_reduces_delay_on_each_success(self):
+        """report_success should reduce delay by half on each success."""
+        from tiktok_monitor import RateLimiter
+        limiter = RateLimiter(initial_delay=1.0, backoff_factor=2.0)
+
+        # First set a delay - two rate limits gets us to 2.0
+        limiter.report_rate_limit()  # 0 -> 1.0
+        limiter.report_rate_limit()  # 1.0 -> 2.0
+        self.assertEqual(limiter.get_current_delay(), 2.0)
+
+        # First success should halve delay: 2.0 -> 1.0
+        limiter.report_success()
+        self.assertEqual(limiter.get_current_delay(), 1.0)
+
+        # Second success should halve again: 1.0 -> 0.5
+        limiter.report_success()
+        self.assertEqual(limiter.get_current_delay(), 0.5)
+
+        # Third success should clear (0.5 / 2 = 0.25 < 0.5 threshold)
+        limiter.report_success()
+        self.assertEqual(limiter.get_current_delay(), 0.0)
+
+    def test_report_success_clears_delay_when_below_threshold(self):
+        """report_success should clear delay when it drops below 0.5."""
+        from tiktok_monitor import RateLimiter
+        limiter = RateLimiter(initial_delay=1.0, backoff_factor=2.0)
+
+        limiter.report_rate_limit()  # Sets delay to 1.0
+        self.assertEqual(limiter.get_current_delay(), 1.0)
+
+        # First success: 1.0 -> 0.5
+        limiter.report_success()
+        self.assertEqual(limiter.get_current_delay(), 0.5)
+
+        # Second success: 0.5 / 2 = 0.25 < 0.5 threshold, so clears to 0
+        limiter.report_success()
+        self.assertEqual(limiter.get_current_delay(), 0.0)
+
+    def test_rate_limit_increases_delay_after_successes_reduced_it(self):
+        """report_rate_limit should increase delay even after successes reduced it."""
+        from tiktok_monitor import RateLimiter
+        limiter = RateLimiter(initial_delay=1.0, backoff_factor=2.0)
+
+        # Set initial delay
+        limiter.report_rate_limit()  # 0 -> 1.0
+        limiter.report_rate_limit()  # 1.0 -> 2.0
+        self.assertEqual(limiter.get_current_delay(), 2.0)
+
+        # Success reduces delay: 2.0 -> 1.0
+        limiter.report_success()
+        self.assertEqual(limiter.get_current_delay(), 1.0)
+
+        # Another rate limit should double: 1.0 -> 2.0
+        limiter.report_rate_limit()
+        self.assertEqual(limiter.get_current_delay(), 2.0)
+
+        # Success should halve again: 2.0 -> 1.0
+        limiter.report_success()
+        self.assertEqual(limiter.get_current_delay(), 1.0)
+
+
+class TestRateLimitErrorDetection(TestCase):
+    """Tests for rate limit error detection in VideoDownloader."""
+
+    def setUp(self):
+        """Create a temporary directory for test downloads."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.downloader = VideoDownloader(self.temp_dir, {"sessionid": "test"})
+
+    def tearDown(self):
+        """Clean up."""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_detects_429_as_rate_limit(self):
+        """Should detect HTTP 429 as rate limit error."""
+        stderr = "ERROR: [download] Got error: HTTP Error 429: Too Many Requests"
+        self.assertTrue(self.downloader._is_rate_limit_error(stderr))
+
+    def test_detects_530_as_rate_limit(self):
+        """Should detect HTTP 530 as rate limit error."""
+        stderr = "ERROR: [download] Got error: HTTP Error 530: Too Many Requests"
+        self.assertTrue(self.downloader._is_rate_limit_error(stderr))
+
+    def test_detects_0_bytes_read_as_rate_limit(self):
+        """Should detect '0 bytes read' as rate limit error."""
+        stderr = "ERROR: [download] Got error: 0 bytes read, 8545873 more expected. Giving up after 10 retries"
+        self.assertTrue(self.downloader._is_rate_limit_error(stderr))
+
+    def test_does_not_detect_404_as_rate_limit(self):
+        """Should not detect 404 as rate limit error."""
+        stderr = "ERROR: unable to download video data: HTTP Error 404: Not Found"
+        self.assertFalse(self.downloader._is_rate_limit_error(stderr))
+
+    def test_detects_404_as_not_found(self):
+        """Should detect 404 as not found error."""
+        stderr = "ERROR: unable to download video data: HTTP Error 404: Not Found"
+        self.assertTrue(self.downloader._is_not_found_error(stderr))
+
+    def test_does_not_detect_429_as_not_found(self):
+        """Should not detect 429 as not found error."""
+        stderr = "ERROR: [download] Got error: HTTP Error 429: Too Many Requests"
+        self.assertFalse(self.downloader._is_not_found_error(stderr))
+
+    def test_download_returns_rate_limited_error_type(self):
+        """download should return rate_limited error type on 429/530 errors."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(
+                returncode=1,
+                stderr="ERROR: [download] Got error: HTTP Error 429: Too Many Requests"
+            )
+            result, was_skipped, error_type = self.downloader.download("vid123", "author", "Test", "")
+
+        self.assertIsNone(result)
+        self.assertFalse(was_skipped)
+        self.assertEqual(error_type, "rate_limited")
+
+    def test_download_returns_not_found_error_type(self):
+        """download should return not_found error type on 404 errors."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(
+                returncode=1,
+                stderr="ERROR: unable to download video data: HTTP Error 404: Not Found"
+            )
+            result, was_skipped, error_type = self.downloader.download("vid123", "author", "Test", "")
+
+        self.assertIsNone(result)
+        self.assertFalse(was_skipped)
+        self.assertEqual(error_type, "not_found")
+
+
+class TestThreadSafeQueueOperations(TestCase):
+    """Tests for thread-safe queue operations in DataStore."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.store = DataStore(self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_pop_pending_download_returns_first_item(self):
+        """pop_pending_download should return and remove the first pending item."""
+        self.store.queue_download("vid1", {"url": "url1", "collection_name": "Test"})
+        self.store.queue_download("vid2", {"url": "url2", "collection_name": "Test"})
+
+        item = self.store.pop_pending_download()
+        self.assertEqual(item["id"], "vid1")
+        self.assertEqual(len(self.store.get_pending_downloads()), 1)
+
+    def test_pop_pending_download_returns_none_when_empty(self):
+        """pop_pending_download should return None when queue is empty."""
+        item = self.store.pop_pending_download()
+        self.assertIsNone(item)
+
+    def test_requeue_video_moves_to_end(self):
+        """requeue_video should move video to end of pending queue."""
+        self.store.queue_download("vid1", {"url": "url1", "collection_name": "Test"})
+        self.store.queue_download("vid2", {"url": "url2", "collection_name": "Test"})
+        self.store.queue_download("vid3", {"url": "url3", "collection_name": "Test"})
+
+        # Requeue vid1 (should move to end)
+        result = self.store.requeue_video("vid1")
+        self.assertTrue(result)
+
+        pending = self.store.get_pending_downloads()
+        self.assertEqual(pending[0]["id"], "vid2")
+        self.assertEqual(pending[1]["id"], "vid3")
+        self.assertEqual(pending[2]["id"], "vid1")
+
+    def test_requeue_video_adds_requeued_at(self):
+        """requeue_video should add requeued_at timestamp."""
+        self.store.queue_download("vid1", {"url": "url1", "collection_name": "Test"})
+        self.store.requeue_video("vid1")
+
+        pending = self.store.get_pending_downloads()
+        self.assertIn("requeued_at", pending[0])
+
+    def test_requeue_video_returns_false_if_not_found(self):
+        """requeue_video should return False if video not in pending."""
+        result = self.store.requeue_video("nonexistent")
+        self.assertFalse(result)
+
+    def test_get_pending_count(self):
+        """get_pending_count should return correct count."""
+        self.assertEqual(self.store.get_pending_count(), 0)
+
+        self.store.queue_download("vid1", {"url": "url1", "collection_name": "Test"})
+        self.assertEqual(self.store.get_pending_count(), 1)
+
+        self.store.queue_download("vid2", {"url": "url2", "collection_name": "Test"})
+        self.assertEqual(self.store.get_pending_count(), 2)
+
+    def test_get_pending_downloads_returns_copy(self):
+        """get_pending_downloads should return a copy, not the original list."""
+        self.store.queue_download("vid1", {"url": "url1", "collection_name": "Test"})
+
+        pending = self.store.get_pending_downloads()
+        pending.clear()  # Modify the returned list
+
+        # Original should be unchanged
+        self.assertEqual(self.store.get_pending_count(), 1)
+
+    def test_concurrent_queue_operations(self):
+        """Queue operations should be thread-safe under concurrent access."""
+        import threading
+        import time
+
+        errors = []
+
+        def queue_videos(start_id, count):
+            try:
+                for i in range(count):
+                    self.store.queue_download(f"vid{start_id + i}", {"url": f"url{i}", "collection_name": "Test"})
+            except Exception as e:
+                errors.append(e)
+
+        def pop_videos(count):
+            try:
+                for _ in range(count):
+                    self.store.pop_pending_download()
+                    time.sleep(0.001)  # Small delay to increase contention
+            except Exception as e:
+                errors.append(e)
+
+        # Create threads that concurrently add and remove from queue
+        threads = [
+            threading.Thread(target=queue_videos, args=(0, 50)),
+            threading.Thread(target=queue_videos, args=(100, 50)),
+            threading.Thread(target=pop_videos, args=(30,)),
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Should complete without errors
+        self.assertEqual(len(errors), 0, f"Errors during concurrent operations: {errors}")
+
+
+class TestDownloadWorker(TestCase):
+    """Tests for DownloadWorker background processing."""
+
+    def setUp(self):
+        """Create temporary directory and mock downloader."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.store = DataStore(self.temp_dir)
+        self.downloader = VideoDownloader(self.temp_dir, {"sessionid": "test"})
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_download_worker_can_start_and_stop(self):
+        """DownloadWorker should start and stop cleanly."""
+        from tiktok_monitor import DownloadWorker
+
+        worker = DownloadWorker(self.store, self.downloader, max_parallel=2)
+        worker.start()
+        self.assertTrue(worker.is_running())
+
+        worker.stop(timeout=5)
+        self.assertFalse(worker.is_running())
+
+    def test_download_worker_processes_queue(self):
+        """DownloadWorker should process items from the queue."""
+        import time
+        from tiktok_monitor import DownloadWorker
+
+        # Add item to queue
+        self.store.queue_download("vid1", {"url": "https://example.com/video", "collection_name": "Test", "author": "testuser"})
+
+        # Mock the download to succeed
+        with mock.patch.object(self.downloader, 'download') as mock_download:
+            mock_download.return_value = ("/path/to/video.mp4", False, None)
+
+            worker = DownloadWorker(self.store, self.downloader, max_parallel=1)
+            worker.start()
+
+            # Wait for processing
+            time.sleep(0.5)
+
+            worker.stop(timeout=5)
+
+        # Should have been processed
+        self.assertEqual(self.store.get_pending_count(), 0)
+
+    def test_download_worker_handles_rate_limit(self):
+        """DownloadWorker should requeue rate-limited videos."""
+        import time
+        from tiktok_monitor import DownloadWorker, VideoDownloader
+
+        # Add item to queue
+        self.store.queue_download("vid1", {"url": "https://example.com/video", "collection_name": "Test", "author": "testuser"})
+
+        # Mock the download to return rate_limited, then succeed
+        call_count = [0]
+
+        def mock_download_fn(video_id, author, collection_name, description=""):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return (None, False, VideoDownloader.ERROR_RATE_LIMITED)
+            return ("/path/to/video.mp4", False, None)
+
+        with mock.patch.object(self.downloader, 'download', side_effect=mock_download_fn):
+            with mock.patch.object(self.downloader.rate_limiter, 'wait_if_needed'):
+                worker = DownloadWorker(self.store, self.downloader, max_parallel=1)
+                worker.start()
+
+                # Wait for both attempts to complete
+                for _ in range(30):  # Wait up to 3 seconds
+                    time.sleep(0.1)
+                    if call_count[0] >= 2:
+                        break
+
+                worker.stop(timeout=5)
+
+        # Should have been called twice (rate limited then success)
+        self.assertEqual(call_count[0], 2)
+
+    def test_download_worker_marks_not_found_as_failed(self):
+        """DownloadWorker should mark 404 videos as failed."""
+        import time
+        from tiktok_monitor import DownloadWorker, VideoDownloader
+
+        # Add item to queue
+        self.store.queue_download("vid1", {"url": "https://example.com/video", "collection_name": "Test", "author": "testuser"})
+
+        # Track if download was called
+        download_called = [False]
+
+        def mock_download_fn(video_id, author, collection_name, description=""):
+            download_called[0] = True
+            return (None, False, VideoDownloader.ERROR_NOT_FOUND)
+
+        with mock.patch.object(self.downloader, 'download', side_effect=mock_download_fn):
+            with mock.patch.object(self.downloader.rate_limiter, 'wait_if_needed'):
+                worker = DownloadWorker(self.store, self.downloader, max_parallel=1)
+                worker.start()
+
+                # Wait for download to be called
+                for _ in range(30):  # Wait up to 3 seconds
+                    time.sleep(0.1)
+                    if download_called[0]:
+                        break
+
+                # Give worker time to process the result
+                time.sleep(0.2)
+
+                worker.stop(timeout=5)
+
+        # Should be marked as failed
+        self.assertEqual(len(self.store.queue["failed"]), 1)
+        self.assertEqual(self.store.queue["failed"][0]["id"], "vid1")
 
 
 if __name__ == "__main__":

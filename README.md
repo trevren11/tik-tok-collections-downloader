@@ -166,7 +166,25 @@ DOWNLOAD_DIR=/path/to/your/downloads
 
 # Sync interval in minutes (default: 30)
 SYNC_INTERVAL=15
+
+# Number of parallel downloads (default: 3)
+MAX_PARALLEL=3
 ```
+
+These can also be set in `config.json`:
+
+```json
+{
+  "sessionid": "YOUR_SESSIONID_HERE",
+  "download_dir": "./downloads",
+  "max_parallel": 3
+}
+```
+
+**Rate Limiting**: The downloader automatically handles rate limiting with exponential backoff. When TikTok returns HTTP 429/530 errors, it will:
+- Automatically increase delay between downloads
+- Keep rate-limited videos in the queue for retry
+- Gradually reduce delay after successful downloads
 
 ### docker-compose.yml
 
@@ -185,6 +203,7 @@ services:
       - ${DOWNLOAD_DIR:-./downloads}:/app/downloads
     environment:
       - SYNC_INTERVAL=${SYNC_INTERVAL:-30}
+      - MAX_PARALLEL=${MAX_PARALLEL:-3}
 ```
 
 The container will:
