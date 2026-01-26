@@ -95,6 +95,9 @@ python tiktok_monitor.py --status
 | `--limit, -l` | Limit downloads per run |
 | `--collection-limit` | Limit collections to sync |
 | `--video-limit` | Limit videos per collection |
+| `--full-sync` | Force full sync of all collections (fetch ALL pages, not just recent ~30) |
+| `--fetch-all-favorites` | Fetch ALL favorited videos using API pagination |
+| `--update-metadata` | Backfill enriched metadata (AI summaries, subtitles) for all downloaded videos |
 | `--delete VIDEO_ID` | Delete specific video(s) by ID |
 | `--delete-all` | Delete all downloaded videos |
 
@@ -118,6 +121,15 @@ python tiktok_monitor.py --delete 7597399138594065687 7596230214078991638
 
 # Delete all downloaded videos
 python tiktok_monitor.py --delete-all
+
+# Full sync - fetch ALL videos in ALL collections (not just recent ~30)
+python tiktok_monitor.py --sync --full-sync
+
+# Fetch ALL favorites (uses API pagination, more reliable than scroll-based)
+python tiktok_monitor.py --fetch-all-favorites
+
+# Backfill AI-generated metadata for previously downloaded videos
+python tiktok_monitor.py --update-metadata
 ```
 
 ### Web Viewer
@@ -164,11 +176,17 @@ Create a `.env` file or set environment variables:
 # Path to your downloads directory
 DOWNLOAD_DIR=/path/to/your/downloads
 
-# Sync interval in minutes (default: 30)
+# Sync interval in minutes (default: 120)
 SYNC_INTERVAL=15
 
 # Number of parallel downloads (default: 3)
 MAX_PARALLEL=3
+
+# Force full sync of all collections (fetch ALL pages, not just recent ~30)
+FULL_SYNC=true
+
+# Fetch ALL favorites on startup (one-time operation, may take a while)
+FETCH_ALL_FAVORITES=true
 ```
 
 These can also be set in `config.json`:
