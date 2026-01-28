@@ -141,7 +141,17 @@ python -m unittest tests.test_monitor -v
 
 ## Docker
 
-Run both the downloader and web viewer together using Docker:
+Run both the downloader and web viewer together using Docker.
+
+### Docker Hub
+
+Pre-built images are available on Docker Hub:
+
+```bash
+docker pull trevren11/tiktok-collections-downloader:latest
+```
+
+Images are automatically built and published on every push to main.
 
 ### Quick Start
 
@@ -193,7 +203,8 @@ version: '3.8'
 
 services:
   tiktok-downloader:
-    build: .
+    image: trevren11/tiktok-collections-downloader:latest
+    # Or build locally: build: .
     container_name: tiktok-collections
     restart: unless-stopped
     ports:
@@ -214,23 +225,26 @@ The container will:
 ### Manual Docker Commands
 
 ```bash
-# Build image
+# Pull from Docker Hub
+docker pull trevren11/tiktok-collections-downloader:latest
+
+# Or build locally
 docker build -t tiktok-collections .
 
-# Run with custom settings
+# Run with custom settings (using Docker Hub image)
 docker run -d \
   -p 8425:8425 \
   -v $(pwd)/config.json:/app/config/config.json:ro \
   -v /path/to/downloads:/app/downloads \
   -e SYNC_INTERVAL=30 \
   --name tiktok-collections \
-  tiktok-collections
+  trevren11/tiktok-collections-downloader:latest
 
 # Run one-off sync
 docker run --rm \
   -v $(pwd)/config.json:/app/config/config.json:ro \
   -v /path/to/downloads:/app/downloads \
-  tiktok-collections python tiktok_monitor.py --sync
+  trevren11/tiktok-collections-downloader:latest python tiktok_monitor.py --sync
 ```
 
 ## How It Works
@@ -340,6 +354,22 @@ If upgrading from a version that stored JSON files in the download root:
 - **Never share your `config.json`** - it contains session credentials
 - Session cookies expire periodically - you may need to refresh them
 - This tool only reads your data; it doesn't post or modify anything
+
+## CI/CD
+
+The project uses GitHub Actions for continuous integration and deployment:
+
+- **Tests** run on every PR and push to main
+- **Docker images** are built and published to both Docker Hub and GitHub Container Registry on push to main
+
+### Repository Secrets (for maintainers)
+
+To enable Docker Hub publishing, configure these secrets in GitHub repository settings:
+
+| Secret | Description |
+|--------|-------------|
+| `DOCKERHUB_USERNAME` | Docker Hub username (`trevren11`) |
+| `DOCKERHUB_TOKEN` | Docker Hub access token ([create one here](https://hub.docker.com/settings/security)) |
 
 ## Disclaimer
 

@@ -1,6 +1,9 @@
 services:
   tiktok-downloader:
-    build: .
+    # Use pre-built image from Docker Hub (recommended):
+    image: trevren11/tiktok-collections-downloader:latest
+    # Or build locally by uncommenting below and commenting out image above:
+    # build: .
     container_name: tiktok-collections
     restart: unless-stopped
     volumes:
