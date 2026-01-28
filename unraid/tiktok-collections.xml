@@ -1,19 +1,19 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>tiktok-collections</Name>
-  <Repository>yourusername/tiktok-collections:latest</Repository>
-  <Registry>https://hub.docker.com/r/yourusername/tiktok-collections/</Registry>
+  <Repository>trevren11/tiktok-collections-downloader:latest</Repository>
+  <Registry>https://hub.docker.com/r/trevren11/tiktok-collections-downloader/</Registry>
   <Branch>
     <Tag>latest</Tag>
     <TagDescription>Latest stable release</TagDescription>
   </Branch>
   <Network>bridge</Network>
   <Privileged>false</Privileged>
-  <Support>https://github.com/yourusername/tiktok-collections-downloader/issues</Support>
-  <Project>https://github.com/yourusername/tiktok-collections-downloader</Project>
+  <Support>https://github.com/trevren11/tik-tok-collections-downloader/issues</Support>
+  <Project>https://github.com/trevren11/tik-tok-collections-downloader</Project>
   <Overview>Automatically monitor and download TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure. Runs on a configurable schedule to keep your collection up to date.</Overview>
   <Category>MediaApp:Video Downloaders:Other</Category>
-  <Icon>https://raw.githubusercontent.com/yourusername/tiktok-collections-downloader/main/icon.png</Icon>
+  <Icon>https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/icon.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <Description>Automatically monitor and download TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure.</Description>
   <Networking>
