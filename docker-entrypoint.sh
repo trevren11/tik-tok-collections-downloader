@@ -8,8 +8,20 @@ export PYTHONUNBUFFERED=1
 if [ -f /app/config/config.json ]; then
     ln -sf /app/config/config.json /app/config.json
     echo "Config file linked successfully"
+elif [ -n "$TIKTOK_SESSION_ID" ]; then
+    # Generate config.json from environment variables
+    echo "Generating config.json from environment variables..."
+    cat > /app/config.json << EOF
+{
+    "sessionid": "$TIKTOK_SESSION_ID",
+    "download_dir": "${DOWNLOAD_DIR:-/app/downloads}"
+}
+EOF
+    echo "Config generated from TIKTOK_SESSION_ID"
 else
-    echo "WARNING: No config.json found at /app/config/config.json"
+    echo "ERROR: No config.json found and TIKTOK_SESSION_ID not set"
+    echo "Either mount a config.json or set the TIKTOK_SESSION_ID environment variable"
+    exit 1
 fi
 
 # Build command arguments
