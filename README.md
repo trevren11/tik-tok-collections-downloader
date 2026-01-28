@@ -153,6 +153,17 @@ docker pull trevren11/tiktok-collections-downloader:latest
 
 Images are automatically built and published on every push to main.
 
+### Unraid
+
+For Unraid users, you can add this container via the template URL:
+
+1. Go to **Docker** tab → **Add Container**
+2. Click **Template repositories** at the bottom
+3. Add: `https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/unraid/tiktok-collections-downloader.xml`
+4. Click **Save**, then select the template from the dropdown
+
+Or manually add the container with repository: `trevren11/tiktok-collections-downloader:latest`
+
 ### Quick Start
 
 ```bash

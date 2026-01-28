@@ -1,81 +1,31 @@
-# Unraid Installation
+# Unraid Community Applications Template
 
-## Option 1: Private Template (Recommended for Personal Use)
+This folder contains the template for Unraid Community Applications.
 
-1. **Copy the config.json template to your Unraid server:**
-   ```bash
-   mkdir -p /mnt/user/appdata/tiktok-collections
-   ```
+## Files
 
-2. **Create config.json on Unraid:**
-   ```bash
-   nano /mnt/user/appdata/tiktok-collections/config.json
-   ```
+- `tiktok-collections-downloader.xml` - CA template definition
+- `icon.png` - Container icon (256x256 PNG recommended)
 
-   Add your TikTok session ID:
-   ```json
-   {
-     "sessionid": "YOUR_SESSIONID_HERE",
-     "download_dir": "/app/downloads"
-   }
-   ```
+## Adding to Community Apps
 
-3. **Copy the XML template to Unraid:**
-   - SSH into your Unraid server
-   - Create the private templates directory:
-     ```bash
-     mkdir -p /boot/config/plugins/community.applications/private
-     ```
-   - Copy `tiktok-collections.xml` to that directory
+To make this container discoverable in Unraid's Community Apps:
 
-4. **Install via Community Applications:**
-   - Go to Apps tab in Unraid
-   - Search for "tiktok-collections"
-   - Click Install and configure paths
+1. Fork the [Community Applications repository](https://github.com/Squidly271/community.applications)
+2. Add `tiktok-collections-downloader.xml` to the appropriate folder
+3. Submit a pull request
 
-## Option 2: Community Applications (Public)
+## Manual Installation (Alternative)
 
-To publish publicly:
+If not yet in Community Apps, users can add the template URL directly:
 
-1. **Push Docker image to Docker Hub:**
-   ```bash
-   docker login
-   docker build -t yourusername/tiktok-collections:latest .
-   docker push yourusername/tiktok-collections:latest
-   ```
+1. In Unraid, go to **Docker** tab
+2. Click **Add Container**
+3. Click **Template repositories** at the bottom
+4. Add: `https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/unraid/tiktok-collections-downloader.xml`
+5. Click **Save**
+6. The container will now appear in the template dropdown
 
-2. **Create a template repository on GitHub:**
-   - Create repo named `docker-templates` (or similar)
-   - Add the XML file to it
-   - Structure: `yourusername/docker-templates/tiktok-collections.xml`
+## Icon
 
-3. **Add your template repo to Unraid:**
-   - Docker tab → Add Container → Template Repositories
-   - Add: `https://github.com/yourusername/docker-templates`
-
-4. **For official CA inclusion:**
-   - Fork [Community Applications](https://github.com/Squidly271/community.applications)
-   - Add your template
-   - Submit PR
-
-## Configuration
-
-| Setting | Description |
-|---------|-------------|
-| Config Directory | Where config.json is stored (contains session ID) |
-| Downloads Directory | Where videos are saved |
-| TikTok Session ID | Your `sessionid` cookie from TikTok (alternative to config.json) |
-| Sync Interval | Minutes between sync checks (default: 120) |
-| Download Limit | Limit downloads per sync cycle (e.g., set to 5 for testing, leave empty for unlimited) |
-| Enable Viewer | Set to `true` to enable the web viewer for browsing downloaded videos |
-| Viewer Port | Port for the web viewer (default: 8425). Change this if port 8425 is already in use |
-| Viewer Web Port | The host port mapping - should match Viewer Port value |
-
-## Getting Your TikTok Session ID
-
-1. Open TikTok in your browser and log in
-2. Open DevTools (F12) → Application → Cookies
-3. Find `sessionid` cookie value
-4. Either:
-   - Put it in config.json, OR
-   - Enter it in the Unraid template settings
+Add a 256x256 PNG icon named `icon.png` to this folder. The template references it from GitHub raw URL.

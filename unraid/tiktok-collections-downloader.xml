@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>tiktok-collections-downloader</Name>
+  <Repository>trevren11/tiktok-collections-downloader:latest</Repository>
+  <Registry>https://hub.docker.com/r/trevren11/tiktok-collections-downloader</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/trevren11/tik-tok-collections-downloader/issues</Support>
+  <Project>https://github.com/trevren11/tik-tok-collections-downloader</Project>
+  <Overview>Download and organize your TikTok saved videos by collection, including full metadata and captions. Features a built-in web viewer to browse your downloaded content.</Overview>
+  <Category>Downloaders: MediaApp:Video</Category>
+  <WebUI>http://[IP]:[PORT:8425]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/unraid/tiktok-collections-downloader.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/unraid/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText/>
+  <DonateLink>https://www.buymeacoffee.com/trevren11</DonateLink>
+  <Requires>TikTok session cookie (sessionid) from your browser</Requires>
+  <Config Name="Web UI Port" Target="8425" Default="8425" Mode="tcp" Description="Port for the web viewer interface" Type="Port" Display="always" Required="true" Mask="false">8425</Config>
+  <Config Name="Config File" Target="/app/config/config.json" Default="/mnt/user/appdata/tiktok-collections/config.json" Mode="ro" Description="Path to your config.json file containing TikTok session cookie" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/tiktok-collections/config.json</Config>
+  <Config Name="Downloads Directory" Target="/app/downloads" Default="/mnt/user/data/tiktok-downloads" Mode="rw" Description="Where to store downloaded videos and metadata" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/data/tiktok-downloads</Config>
+  <Config Name="Sync Interval" Target="SYNC_INTERVAL" Default="120" Mode="" Description="How often to check for new videos (in minutes)" Type="Variable" Display="always" Required="false" Mask="false">120</Config>
+  <Config Name="Full Sync" Target="FULL_SYNC" Default="false" Mode="" Description="Set to true to fetch ALL videos in collections (not just recent ~30)" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Fetch All Favorites" Target="FETCH_ALL_FAVORITES" Default="false" Mode="" Description="Set to true to fetch ALL favorited videos on startup" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>
