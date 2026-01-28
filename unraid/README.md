@@ -33,30 +33,19 @@
    - Search for "tiktok-collections"
    - Click Install and configure paths
 
-## Option 2: Community Applications (Public)
+## Option 2: Add Template URL Directly
 
-To publish publicly:
+The template is hosted on GitHub and can be added directly:
 
-1. **Push Docker image to Docker Hub:**
-   ```bash
-   docker login
-   docker build -t yourusername/tiktok-collections:latest .
-   docker push yourusername/tiktok-collections:latest
+1. **In Unraid, go to Docker tab → Add Container**
+2. **At the bottom, click "Template repositories"**
+3. **Add this URL:**
    ```
+   https://github.com/trevren11/tik-tok-collections-downloader
+   ```
+4. **Click Save, then select "tiktok-collections" from the template dropdown**
 
-2. **Create a template repository on GitHub:**
-   - Create repo named `docker-templates` (or similar)
-   - Add the XML file to it
-   - Structure: `yourusername/docker-templates/tiktok-collections.xml`
-
-3. **Add your template repo to Unraid:**
-   - Docker tab → Add Container → Template Repositories
-   - Add: `https://github.com/yourusername/docker-templates`
-
-4. **For official CA inclusion:**
-   - Fork [Community Applications](https://github.com/Squidly271/community.applications)
-   - Add your template
-   - Submit PR
+The Docker image `trevren11/tiktok-collections-downloader:latest` is automatically pulled from Docker Hub.
 
 ## Configuration
 
