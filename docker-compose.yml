@@ -20,5 +20,9 @@ services:
       - SYNC_INTERVAL=${SYNC_INTERVAL:-120}
       # Download directory inside container (maps to mounted volume)
       - DOWNLOAD_DIR=/app/downloads
+      # Set to "true" to force full sync of all collections (fetch ALL pages)
+      - FULL_SYNC=${FULL_SYNC:-false}
+      # Set to "true" to fetch ALL favorites on startup (one-time operation)
+      - FETCH_ALL_FAVORITES=${FETCH_ALL_FAVORITES:-false}
     # Uncomment to run specific commands instead of watch mode:
     # command: ["python", "tiktok_monitor.py", "--sync"]

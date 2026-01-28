@@ -404,6 +404,49 @@
             display: block;
         }
 
+        /* Metadata sections */
+        .metadata-section {
+            margin-bottom: 20px;
+            display: none;
+        }
+        .metadata-section.visible {
+            display: block;
+        }
+        .metadata-label {
+            font-size: 12px;
+            color: #fe2c55;
+            font-weight: 600;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .metadata-content {
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: #ddd;
+            background: #252525;
+            padding: 12px;
+            border-radius: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .metadata-content.ai-article {
+            max-height: 300px;
+        }
+        .stickers-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .sticker-tag {
+            background: #333;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 13px;
+            color: #ccc;
+        }
+
         .empty-state {
             text-align: center;
             padding: 60px 20px;
@@ -510,6 +553,25 @@
                 <div class="modal-author" id="modal-author"></div>
                 <div class="modal-collection" id="modal-collection"></div>
                 <div class="modal-caption" id="modal-caption"></div>
+
+                <!-- Enriched metadata sections -->
+                <div class="metadata-section" id="metadata-ai-title">
+                    <div class="metadata-label">AI Title</div>
+                    <div class="metadata-content" id="ai-title-content"></div>
+                </div>
+                <div class="metadata-section" id="metadata-ai-article">
+                    <div class="metadata-label">AI Summary / Recipe</div>
+                    <div class="metadata-content ai-article" id="ai-article-content"></div>
+                </div>
+                <div class="metadata-section" id="metadata-subtitles">
+                    <div class="metadata-label">Transcript (Speech-to-Text)</div>
+                    <div class="metadata-content" id="subtitles-content"></div>
+                </div>
+                <div class="metadata-section" id="metadata-stickers">
+                    <div class="metadata-label">Text Overlays</div>
+                    <div class="stickers-list" id="stickers-content"></div>
+                </div>
+
                 <div class="modal-stats" id="modal-stats"></div>
                 <a class="modal-link" id="modal-link" href="#" target="_blank">View on TikTok</a>
                 <div class="modal-path" id="modal-path"></div>
@@ -981,6 +1043,16 @@
             if (video.video_path) {
                 modalVideo.play().catch(() => {});
             }
+
+            // Fetch and display enriched metadata
+            displayMetadata(null); // Clear previous metadata
+            if (video.video_path) {
+                fetchMetadata(video.video_path).then(metadata => {
+                    if (currentVideoIndex === index) { // Still viewing same video
+                        displayMetadata(metadata);
+                    }
+                });
+            }
         }
 
         function closeModal() {
@@ -1009,6 +1081,73 @@
             if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
             if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
             return num.toString();
+        }
+
+        async function fetchMetadata(videoPath) {
+            if (!videoPath) return null;
+            // videoPath is like ../collections/collection_name/video_id/video.mp4
+            // metadata.json is in the same folder
+            const folderPath = videoPath.substring(0, videoPath.lastIndexOf('/'));
+            const metadataUrl = folderPath + '/metadata.json';
+            try {
+                const response = await fetch(encodeVideoPath(metadataUrl));
+                if (!response.ok) return null;
+                return await response.json();
+            } catch (e) {
+                console.debug('Metadata not available:', metadataUrl);
+                return null;
+            }
+        }
+
+        // Convert HTML breaks to newlines for plain text display
+        function htmlToPlainText(html) {
+            if (!html) return '';
+            // Replace <br>, <br/>, <br /> with newlines
+            let text = html.replace(/<br\s*\/?>/gi, '\n');
+            // Replace </p><p> with double newlines (paragraph breaks)
+            text = text.replace(/<\/p>\s*<p[^>]*>/gi, '\n\n');
+            // Remove any remaining HTML tags
+            text = text.replace(/<[^>]+>/g, '');
+            // Decode HTML entities
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = text;
+            return textarea.value;
+        }
+
+        function displayMetadata(metadata) {
+            // Hide all metadata sections first
+            document.querySelectorAll('.metadata-section').forEach(el => {
+                el.classList.remove('visible');
+            });
+
+            if (!metadata) return;
+
+            // AI Title (show if different from original title/desc)
+            if (metadata.ai_title && metadata.ai_title !== metadata.title && metadata.ai_title !== metadata.original_desc) {
+                document.getElementById('ai-title-content').textContent = htmlToPlainText(metadata.ai_title);
+                document.getElementById('metadata-ai-title').classList.add('visible');
+            }
+
+            // AI Article/Summary (the main rich content like recipes)
+            if (metadata.ai_article) {
+                document.getElementById('ai-article-content').textContent = htmlToPlainText(metadata.ai_article);
+                document.getElementById('metadata-ai-article').classList.add('visible');
+            }
+
+            // Subtitles/Transcript
+            if (metadata.subtitles) {
+                document.getElementById('subtitles-content').textContent = htmlToPlainText(metadata.subtitles);
+                document.getElementById('metadata-subtitles').classList.add('visible');
+            }
+
+            // Stickers (text overlays)
+            if (metadata.stickers && metadata.stickers.length > 0) {
+                const stickersHtml = metadata.stickers.map(s =>
+                    `<span class="sticker-tag">${escapeHtml(s)}</span>`
+                ).join('');
+                document.getElementById('stickers-content').innerHTML = stickersHtml;
+                document.getElementById('metadata-stickers').classList.add('visible');
+            }
         }
 
         function setView(view, updateHash = true) {
