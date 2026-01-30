@@ -137,13 +137,22 @@ python tiktok_monitor.py --update-metadata
 Browse your downloaded videos with the web viewer:
 
 ```bash
+# Start the viewer server (default port 8425)
 python viewer.py
+
+# Use a custom port
+python viewer.py -p 8080
+
+# Serve from a custom downloads directory
+python viewer.py -d /path/to/downloads
 ```
 
-Open http://localhost:8425 in your browser to:
+Open http://localhost:8425/json/viewer.html in your browser to:
 - Browse collections
 - Watch videos with metadata displayed
 - See download status
+
+The viewer automatically serves your downloads directory, making videos accessible from any device on your network.
 
 ### Run Tests
 
@@ -192,6 +201,9 @@ SYNC_INTERVAL=15
 # Number of parallel downloads (default: 3)
 MAX_PARALLEL=3
 
+# Web viewer port (default: 8425)
+VIEWER_PORT=8425
+
 # Force full sync of all collections (fetch ALL pages, not just recent ~30)
 FULL_SYNC=true
 
@@ -236,9 +248,10 @@ services:
 ```
 
 The container will:
-- Start the web viewer on port 8425
+- Start the web viewer server on port 8425 (configurable via VIEWER_PORT)
 - Run the monitor in watch mode (sync + download periodically)
 - Store all data in the mounted downloads directory
+- Serve the viewer interface accessible from any device on your network
 
 ### Manual Docker Commands
 
