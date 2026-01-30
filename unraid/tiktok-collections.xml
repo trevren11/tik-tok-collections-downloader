@@ -31,7 +31,7 @@
       <Mode>rw</Mode>
     </Volume>
   </Data>
-  <Config Name="Web UI Port" Target="8425" Default="8080" Mode="tcp" Description="External port to access the web viewer (maps to internal port 8425)" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Web UI Port" Target="8425" Default="2507" Mode="tcp" Description="External port to access the web viewer (maps to internal port 8425)" Type="Port" Display="always" Required="true" Mask="false">2507</Config>
   <Config Name="Viewer Port" Target="VIEWER_PORT" Default="8425" Mode="" Description="Internal container port for viewer server (default: 8425, only change if needed)" Type="Variable" Display="advanced" Required="false" Mask="false">8425</Config>
   <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/tiktok-collections" Mode="rw" Description="Path to store config.json with your TikTok session credentials" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/tiktok-collections</Config>
   <Config Name="Downloads Directory" Target="/app/downloads" Default="/mnt/user/downloads/tiktok" Mode="rw" Description="Path where TikTok videos will be downloaded" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/downloads/tiktok</Config>

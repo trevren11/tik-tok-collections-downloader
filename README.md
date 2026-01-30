@@ -147,7 +147,7 @@ python viewer.py -p 8080
 python viewer.py -d /path/to/downloads
 ```
 
-Open http://localhost:8425/json/viewer.html in your browser (or http://localhost:8080/json/viewer.html if using Docker with default port mapping) to:
+Open http://localhost:8425/json/viewer.html in your browser (or http://localhost:2507/json/viewer.html if using Docker with default port mapping) to:
 - Browse collections
 - Watch videos with metadata displayed
 - See download status
@@ -238,7 +238,7 @@ services:
     container_name: tiktok-collections
     restart: unless-stopped
     ports:
-      - "8080:8425"  # External:Internal port mapping
+      - "2507:8425"  # External:Internal port mapping
     volumes:
       - ./config.json:/app/config/config.json:ro
       - ${DOWNLOAD_DIR:-./downloads}:/app/downloads
@@ -250,7 +250,7 @@ services:
 
 The container will:
 - Start the web viewer server on internal port 8425
-- Expose viewer on external port 8080 (configurable in docker-compose.yml)
+- Expose viewer on external port 2507 (configurable in docker-compose.yml)
 - Run the monitor in watch mode (sync + download periodically)
 - Store all data in the mounted downloads directory
 - Serve the viewer interface accessible from any device on your network
@@ -266,7 +266,7 @@ docker build -t tiktok-collections .
 
 # Run with custom settings (using Docker Hub image)
 docker run -d \
-  -p 8080:8425 \
+  -p 2507:8425 \
   -v $(pwd)/config.json:/app/config/config.json:ro \
   -v /path/to/downloads:/app/downloads \
   -e SYNC_INTERVAL=30 \
