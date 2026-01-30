@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium && playwright install-deps chromium
 
 # Copy application code
-COPY tiktok_monitor.py tiktok_collections.py viewer.html ./
+COPY tiktok_monitor.py tiktok_collections.py viewer.py viewer.html ./
 COPY tests/ ./tests/
 
 # Create volume mount points

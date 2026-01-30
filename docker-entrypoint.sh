@@ -24,6 +24,21 @@ else
     exit 1
 fi
 
+# Start the viewer server in the background
+VIEWER_PORT="${VIEWER_PORT:-8425}"
+echo "Starting viewer server on port ${VIEWER_PORT}..."
+python -u viewer.py -p "${VIEWER_PORT}" -d /app/downloads &
+VIEWER_PID=$!
+echo "Viewer server started (PID: $VIEWER_PID)"
+
+# Handle shutdown gracefully
+cleanup() {
+    echo "Shutting down..."
+    kill $VIEWER_PID 2>/dev/null || true
+    exit 0
+}
+trap cleanup SIGTERM SIGINT
+
 # Build command arguments
 CMD_ARGS=""
 
@@ -43,7 +58,7 @@ if [ $# -eq 0 ]; then
     fi
 
     echo "Starting monitor in watch mode (interval: ${SYNC_INTERVAL:-120} minutes)..."
-    exec python -u tiktok_monitor.py --watch --interval "${SYNC_INTERVAL:-120}" $CMD_ARGS
+    python -u tiktok_monitor.py --watch --interval "${SYNC_INTERVAL:-120}" $CMD_ARGS
 else
     exec "$@"
 fi

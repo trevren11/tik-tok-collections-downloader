@@ -137,13 +137,22 @@ python tiktok_monitor.py --update-metadata
 Browse your downloaded videos with the web viewer:
 
 ```bash
+# Start the viewer server (default port 8425)
 python viewer.py
+
+# Use a custom port
+python viewer.py -p 8080
+
+# Serve from a custom downloads directory
+python viewer.py -d /path/to/downloads
 ```
 
-Open http://localhost:8425 in your browser to:
+Open http://localhost:8425/json/viewer.html in your browser (or http://localhost:2507/json/viewer.html if using Docker with default port mapping) to:
 - Browse collections
 - Watch videos with metadata displayed
 - See download status
+
+The viewer automatically serves your downloads directory, making videos accessible from any device on your network.
 
 ### Run Tests
 
@@ -192,6 +201,9 @@ SYNC_INTERVAL=15
 # Number of parallel downloads (default: 3)
 MAX_PARALLEL=3
 
+# Web viewer port (default: 8425)
+VIEWER_PORT=8425
+
 # Force full sync of all collections (fetch ALL pages, not just recent ~30)
 FULL_SYNC=true
 
@@ -226,19 +238,22 @@ services:
     container_name: tiktok-collections
     restart: unless-stopped
     ports:
-      - "8425:8425"
+      - "2507:8425"  # External:Internal port mapping
     volumes:
       - ./config.json:/app/config/config.json:ro
       - ${DOWNLOAD_DIR:-./downloads}:/app/downloads
     environment:
       - SYNC_INTERVAL=${SYNC_INTERVAL:-30}
       - MAX_PARALLEL=${MAX_PARALLEL:-3}
+      - VIEWER_PORT=8425  # Internal container port
 ```
 
 The container will:
-- Start the web viewer on port 8425
+- Start the web viewer server on internal port 8425
+- Expose viewer on external port 2507 (configurable in docker-compose.yml)
 - Run the monitor in watch mode (sync + download periodically)
 - Store all data in the mounted downloads directory
+- Serve the viewer interface accessible from any device on your network
 
 ### Manual Docker Commands
 
@@ -251,10 +266,11 @@ docker build -t tiktok-collections .
 
 # Run with custom settings (using Docker Hub image)
 docker run -d \
-  -p 8425:8425 \
+  -p 2507:8425 \
   -v $(pwd)/config.json:/app/config/config.json:ro \
   -v /path/to/downloads:/app/downloads \
   -e SYNC_INTERVAL=30 \
+  -e VIEWER_PORT=8425 \
   --name tiktok-collections \
   trevren11/tiktok-collections-downloader:latest
 
