@@ -31,29 +31,14 @@
       <Mode>rw</Mode>
     </Volume>
   </Data>
-  <Environment>
-    <Variable>
-      <Value></Value>
-      <Name>TIKTOK_SESSION_ID</Name>
-    </Variable>
-    <Variable>
-      <Value>120</Value>
-      <Name>SYNC_INTERVAL</Name>
-    </Variable>
-    <Variable>
-      <Value>1</Value>
-      <Name>PYTHONUNBUFFERED</Name>
-    </Variable>
-    <Variable>
-      <Value></Value>
-      <Name>DOWNLOAD_LIMIT</Name>
-    </Variable>
-  </Environment>
-  <Config Name="Web UI Port" Target="8425" Default="8425" Mode="tcp" Description="Port for the web viewer interface" Type="Port" Display="always" Required="true" Mask="false"/>
-  <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/tiktok-collections" Mode="rw" Description="Path to store config.json with your TikTok session credentials" Type="Path" Display="always" Required="true" Mask="false"/>
-  <Config Name="Downloads Directory" Target="/app/downloads" Default="/mnt/user/downloads/tiktok" Mode="rw" Description="Path where TikTok videos will be downloaded" Type="Path" Display="always" Required="true" Mask="false"/>
-  <Config Name="TikTok Session ID" Target="TIKTOK_SESSION_ID" Default="" Mode="" Description="Your TikTok sessionid cookie (get from browser DevTools). Required for authentication." Type="Variable" Display="always" Required="true" Mask="true"/>
-  <Config Name="Sync Interval (minutes)" Target="SYNC_INTERVAL" Default="120" Mode="" Description="How often to check for new videos (in minutes)" Type="Variable" Display="always" Required="false" Mask="false"/>
-  <Config Name="Python Unbuffered" Target="PYTHONUNBUFFERED" Default="1" Mode="" Description="Enable real-time log output" Type="Variable" Display="advanced" Required="false" Mask="false"/>
-  <Config Name="Download Limit" Target="DOWNLOAD_LIMIT" Default="" Mode="" Description="Limit downloads per sync cycle (e.g., 5 for testing). Leave empty for unlimited." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Web UI Port" Target="8425" Default="8425" Mode="tcp" Description="Port for the web viewer interface" Type="Port" Display="always" Required="true" Mask="false">8425</Config>
+  <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/tiktok-collections" Mode="rw" Description="Path to store config.json with your TikTok session credentials" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/tiktok-collections</Config>
+  <Config Name="Downloads Directory" Target="/app/downloads" Default="/mnt/user/downloads/tiktok" Mode="rw" Description="Path where TikTok videos will be downloaded" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/downloads/tiktok</Config>
+  <Config Name="TikTok Session ID" Target="TIKTOK_SESSION_ID" Default="" Mode="" Description="Your TikTok sessionid cookie (get from browser DevTools). Required for authentication." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Sync Interval (minutes)" Target="SYNC_INTERVAL" Default="120" Mode="" Description="How often to check for new videos (in minutes)" Type="Variable" Display="always" Required="false" Mask="false">120</Config>
+  <Config Name="Max Parallel Downloads" Target="MAX_PARALLEL" Default="3" Mode="" Description="Number of parallel video downloads" Type="Variable" Display="always" Required="false" Mask="false">3</Config>
+  <Config Name="Download Limit" Target="DOWNLOAD_LIMIT" Default="" Mode="" Description="Limit downloads per sync cycle (e.g., 5 for testing). Leave empty for unlimited." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Full Sync" Target="FULL_SYNC" Default="false" Mode="" Description="Force full sync of all collections (fetch ALL pages, not just recent ~30)" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Fetch All Favorites" Target="FETCH_ALL_FAVORITES" Default="false" Mode="" Description="Fetch ALL favorited videos using API pagination on startup (one-time operation)" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Python Unbuffered" Target="PYTHONUNBUFFERED" Default="1" Mode="" Description="Enable real-time log output" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
 </Container>
