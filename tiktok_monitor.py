@@ -161,7 +161,7 @@ class DataStore:
         cleaned_count = 0
 
         collection_dirs = [d for d in self.data_dir.iterdir()
-                          if d.is_dir() and not d.name.startswith(".") and d.name != "json"]
+                          if d.is_dir() and not d.name.startswith(".") and d.name != "data"]
 
         for collection_dir in collection_dirs:
             for video_dir in collection_dir.iterdir():
@@ -232,7 +232,7 @@ class DataStore:
         for collection_dir in self.data_dir.iterdir():
             if not collection_dir.is_dir():
                 continue
-            if collection_dir.name.startswith(".") or collection_dir.name == "json":
+            if collection_dir.name.startswith(".") or collection_dir.name == "data":
                 continue
 
             # Check if this folder name matches any existing collection
@@ -574,7 +574,7 @@ class DataStore:
             if not collection_dir.is_dir():
                 continue
             # Skip hidden directories and json metadata folder
-            if collection_dir.name.startswith(".") or collection_dir.name == "json":
+            if collection_dir.name.startswith(".") or collection_dir.name == "data":
                 continue
 
             collection_count = 0
@@ -2151,8 +2151,8 @@ def cmd_delete(store: DataStore, video_ids: list, delete_all: bool = False):
 
         # Clean up any remaining collection folders in the download directory
         for item in store.data_dir.iterdir():
-            if item.is_dir() and item.name not in [".", "..", "json"]:
-                # Skip json folder (metadata), only delete collection folders
+            if item.is_dir() and item.name not in [".", "..", "data"]:
+                # Skip data folder (metadata), only delete collection folders
                 try:
                     shutil.rmtree(item)
                     logger.info(f"  Removed folder: {item.name}")
@@ -2274,7 +2274,7 @@ def cmd_update_metadata(store: DataStore, downloader: VideoDownloader, limit: Op
 
     # Iterate through collection folders
     for collection_folder in download_dir.iterdir():
-        if not collection_folder.is_dir() or collection_folder.name == "json":
+        if not collection_folder.is_dir() or collection_folder.name == "data":
             continue
 
         # Iterate through video folders within each collection
