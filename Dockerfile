@@ -12,7 +12,7 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 # Unraid-specific labels
 LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/icon.png"
-LABEL net.unraid.docker.webui="http://[IP]:[PORT:2507]/json/viewer.html"
+LABEL net.unraid.docker.webui="http://[IP]:[PORT:8425]/json/viewer.html"
 LABEL net.unraid.docker.managed="true"
 
 WORKDIR /app

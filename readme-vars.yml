@@ -17,7 +17,7 @@ param_usage_include_net: true
 param_net: "bridge"
 param_usage_include_ports: true
 param_ports:
-  - {external_port: "2507", internal_port: "8425", port_desc: "Web viewer interface"}
+  - {external_port: "8425", internal_port: "8425", port_desc: "Web viewer interface"}
 
 param_usage_include_vols: true
 param_volumes:
@@ -68,7 +68,7 @@ app_setup_block: |
 
   ### 3. Access Web Viewer
 
-  Once running, access the web viewer at: `http://your-server-ip:2507/json/viewer.html`
+  Once running, access the web viewer at: `http://your-server-ip:8425/json/viewer.html`
 
   The viewer displays your downloaded videos organized by collection with metadata and captions.
 
