@@ -42,11 +42,11 @@ def main():
         print(f"Creating downloads directory: {downloads_dir}")
         downloads_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check for viewer.html in json/ subdirectory
-    viewer_path = downloads_dir / "json" / "viewer.html"
+    # Check for viewer.html in downloads directory
+    viewer_path = downloads_dir / "viewer.html"
     if viewer_path.exists():
         print(f"✓ Viewer found at: {viewer_path}")
-        print(f"✓ Access at: http://localhost:{args.port}/json/viewer.html")
+        print(f"✓ Access at: http://localhost:{args.port}/viewer.html")
     else:
         print(f"⚠ Warning: viewer.html not found at {viewer_path}")
         print("  Run the monitor first to generate the viewer")

@@ -673,7 +673,7 @@
             if (!downloadPath) return null;
             const parts = downloadPath.split('/');
             if (parts.length >= 3) {
-                // Prefix with ../ since viewer.html is now in json/ folder
+                // Data files are in data/ subfolder
                 return '../' + parts.slice(-3).join('/');
             }
             return null;

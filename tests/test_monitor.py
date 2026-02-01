@@ -492,13 +492,13 @@ class TestDataJsGeneration(TestCase):
     def test_data_js_created_on_init(self):
         """data.js should be created when DataStore is initialized."""
         DataStore(self.temp_dir)
-        data_js = Path(self.temp_dir) / "json" / "data.js"
+        data_js = Path(self.temp_dir) / "data" / "data.js"
         self.assertTrue(data_js.exists(), "data.js should be created on DataStore init")
 
     def test_data_js_contains_valid_javascript(self):
         """data.js should contain valid JavaScript with window variables."""
         DataStore(self.temp_dir)
-        data_js = Path(self.temp_dir) / "json" / "data.js"
+        data_js = Path(self.temp_dir) / "data" / "data.js"
         content = data_js.read_text()
         self.assertIn("window.collectionsData", content)
         self.assertIn("window.videosData", content)
@@ -509,7 +509,7 @@ class TestDataJsGeneration(TestCase):
         store.update_collection("123", {"id": "123", "name": "Test Collection"})
         store.save_collections()
 
-        data_js = Path(self.temp_dir) / "json" / "data.js"
+        data_js = Path(self.temp_dir) / "data" / "data.js"
         content = data_js.read_text()
         self.assertIn("Test Collection", content)
 
@@ -519,14 +519,14 @@ class TestDataJsGeneration(TestCase):
         store.add_video("vid123", {"id": "vid123", "author": "testuser"})
         store.save_videos()
 
-        data_js = Path(self.temp_dir) / "json" / "data.js"
+        data_js = Path(self.temp_dir) / "data" / "data.js"
         content = data_js.read_text()
         self.assertIn("testuser", content)
 
     def test_data_js_updated_on_save_collections(self):
         """data.js should be updated when collections are saved."""
         store = DataStore(self.temp_dir)
-        data_js = Path(self.temp_dir) / "json" / "data.js"
+        data_js = Path(self.temp_dir) / "data" / "data.js"
 
         # Get initial modification time
         initial_content = data_js.read_text()
@@ -542,7 +542,7 @@ class TestDataJsGeneration(TestCase):
     def test_data_js_updated_on_save_videos(self):
         """data.js should be updated when videos are saved."""
         store = DataStore(self.temp_dir)
-        data_js = Path(self.temp_dir) / "json" / "data.js"
+        data_js = Path(self.temp_dir) / "data" / "data.js"
 
         initial_content = data_js.read_text()
 
@@ -567,13 +567,13 @@ class TestViewerHtmlGeneration(TestCase):
     def test_viewer_html_created_on_init(self):
         """DataStore should copy viewer.html to data directory on init."""
         DataStore(self.temp_dir)  # Side effect: creates viewer.html
-        viewer_file = Path(self.temp_dir) / "json" / "viewer.html"
+        viewer_file = Path(self.temp_dir) / "viewer.html"
         self.assertTrue(viewer_file.exists(), "viewer.html should be created on DataStore init")
 
     def test_viewer_html_contains_expected_content(self):
         """Copied viewer.html should contain expected HTML structure."""
         DataStore(self.temp_dir)  # Side effect: creates viewer.html
-        viewer_file = Path(self.temp_dir) / "json" / "viewer.html"
+        viewer_file = Path(self.temp_dir) / "viewer.html"
         content = viewer_file.read_text()
         self.assertIn("<!DOCTYPE html>", content)
         self.assertIn("data.js", content)
@@ -581,7 +581,7 @@ class TestViewerHtmlGeneration(TestCase):
     def test_viewer_html_matches_source(self):
         """Copied viewer.html should match the source file."""
         DataStore(self.temp_dir)  # Side effect: creates viewer.html
-        viewer_file = Path(self.temp_dir) / "json" / "viewer.html"
+        viewer_file = Path(self.temp_dir) / "viewer.html"
 
         # Get source file path (same logic as _write_viewer_html)
         import tiktok_monitor
@@ -810,7 +810,7 @@ class TestAvailableCollectionsFile(TestCase):
         self.store.update_collection("123", {"id": "123", "name": "Test Collection", "total": 10})
         self.store.save_collections()
 
-        available_file = Path(self.temp_dir) / "json" / "available_collections.json"
+        available_file = Path(self.temp_dir) / "data" / "available_collections.json"
         self.assertTrue(available_file.exists(), "available_collections.json should be created")
 
     def test_available_collections_contains_all_collections(self):
@@ -820,7 +820,7 @@ class TestAvailableCollectionsFile(TestCase):
         self.store.update_collection("789", {"id": "789", "name": "Collection C", "total": 20})
         self.store.save_collections()
 
-        available_file = Path(self.temp_dir) / "json" / "available_collections.json"
+        available_file = Path(self.temp_dir) / "data" / "available_collections.json"
         with open(available_file) as f:
             data = json.load(f)
 
@@ -834,7 +834,7 @@ class TestAvailableCollectionsFile(TestCase):
         self.store.update_collection("789", {"id": "789", "name": "Mango", "total": 3})
         self.store.save_collections()
 
-        available_file = Path(self.temp_dir) / "json" / "available_collections.json"
+        available_file = Path(self.temp_dir) / "data" / "available_collections.json"
         with open(available_file) as f:
             data = json.load(f)
 
@@ -846,7 +846,7 @@ class TestAvailableCollectionsFile(TestCase):
         self.store.update_collection("123", {"id": "123", "name": "Test", "total": 42})
         self.store.save_collections()
 
-        available_file = Path(self.temp_dir) / "json" / "available_collections.json"
+        available_file = Path(self.temp_dir) / "data" / "available_collections.json"
         with open(available_file) as f:
             data = json.load(f)
 
@@ -860,7 +860,7 @@ class TestAvailableCollectionsFile(TestCase):
         self.store.update_collection("123", {"id": "123", "name": "Test", "total": 10})
         self.store.save_collections()
 
-        available_file = Path(self.temp_dir) / "json" / "available_collections.json"
+        available_file = Path(self.temp_dir) / "data" / "available_collections.json"
         with open(available_file) as f:
             data = json.load(f)
 
@@ -869,7 +869,7 @@ class TestAvailableCollectionsFile(TestCase):
 
 
 class TestJsonFolderMigration(TestCase):
-    """Tests for migration to json/ subfolder."""
+    """Tests for migration to data/ subfolder."""
 
     def setUp(self):
         """Create a temporary directory for test data."""
@@ -892,7 +892,7 @@ class TestJsonFolderMigration(TestCase):
         store.save_collections()
 
         # Files should be in json/ folder
-        self.assertTrue((Path(self.temp_dir) / "json" / "collections.json").exists())
+        self.assertTrue((Path(self.temp_dir) / "data" / "collections.json").exists())
         # Files should NOT be in root
         self.assertFalse((Path(self.temp_dir) / "collections.json").exists())
 
@@ -911,8 +911,8 @@ class TestJsonFolderMigration(TestCase):
         # Files should be moved to json/
         self.assertFalse(old_collections.exists(), "Old collections.json should be moved")
         self.assertFalse(old_videos.exists(), "Old videos.json should be moved")
-        self.assertTrue((Path(self.temp_dir) / "json" / "collections.json").exists())
-        self.assertTrue((Path(self.temp_dir) / "json" / "videos.json").exists())
+        self.assertTrue((Path(self.temp_dir) / "data" / "collections.json").exists())
+        self.assertTrue((Path(self.temp_dir) / "data" / "videos.json").exists())
 
         # Data should be preserved
         self.assertIn("test_coll", store.collections)
@@ -1270,7 +1270,7 @@ class TestWatchModeStartupDownload(TestCase):
         store1.save_queue()
 
         # Check the file directly
-        queue_file = Path(self.temp_dir) / "json" / "download_queue.json"
+        queue_file = Path(self.temp_dir) / "data" / "download_queue.json"
         with open(queue_file) as f:
             data = json.load(f)
 

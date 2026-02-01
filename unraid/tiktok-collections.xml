@@ -17,7 +17,7 @@
   <Icon>https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/icon.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <Description>Automatically monitor and download TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure.</Description>
-  <WebUI>http://[IP]:[PORT:8425]/json/viewer.html</WebUI>
+  <WebUI>http://[IP]:[PORT:8425]/viewer.html</WebUI>
   <Networking>
     <Mode>bridge</Mode>
   </Networking>

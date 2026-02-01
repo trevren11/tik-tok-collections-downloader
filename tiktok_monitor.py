@@ -69,18 +69,18 @@ class DataStore:
         self._save_lock = threading.Lock()  # Prevent concurrent file writes
         self._queue_lock = threading.Lock()  # Protect queue operations for concurrent access
 
-        # Create json subfolder for metadata files
-        self.json_dir = self.data_dir / "json"
-        self.json_dir.mkdir(parents=True, exist_ok=True)
+        # Create data subfolder for metadata files
+        self.data_subdir = self.data_dir / "data"
+        self.data_subdir.mkdir(parents=True, exist_ok=True)
 
-        self.collections_file = self.json_dir / "collections.json"
-        self.videos_file = self.json_dir / "videos.json"
-        self.queue_file = self.json_dir / "download_queue.json"
-        self.data_js_file = self.json_dir / "data.js"
-        self.viewer_file = self.json_dir / "viewer.html"
+        self.collections_file = self.data_subdir / "collections.json"
+        self.videos_file = self.data_subdir / "videos.json"
+        self.queue_file = self.data_subdir / "download_queue.json"
+        self.data_js_file = self.data_subdir / "data.js"
+        self.viewer_file = self.data_dir / "viewer.html"
 
-        # Migrate existing files from root to json/ folder
-        self._migrate_to_json_folder()
+        # Migrate existing files from root and json/ folder to data/ folder
+        self._migrate_to_data_folder()
 
         self._corruption_detected = False
         self.collections = self._load(self.collections_file, {})
@@ -111,17 +111,37 @@ class DataStore:
                 return default
         return default
 
-    def _migrate_to_json_folder(self):
-        """Migrate existing JSON files from data_dir root to json/ subfolder."""
+    def _migrate_to_data_folder(self):
+        """Migrate existing JSON files from data_dir root and json/ folder to data/ subfolder."""
         import shutil
 
+        # Migrate from json/ folder to data/ folder
+        old_json_dir = self.data_dir / "json"
+        if old_json_dir.exists():
+            for old_file in old_json_dir.glob("*"):
+                if old_file.name == "viewer.html":
+                    # Move viewer.html to root of data_dir
+                    new_path = self.data_dir / old_file.name
+                else:
+                    # Move other files to data/ subfolder
+                    new_path = self.data_subdir / old_file.name
+
+                if not new_path.exists():
+                    shutil.move(str(old_file), str(new_path))
+                    logger.info(f"Migrated {old_file.name} from json/ to {'root' if old_file.name == 'viewer.html' else 'data/'}")
+
+            # Remove old json directory if empty
+            if not any(old_json_dir.iterdir()):
+                old_json_dir.rmdir()
+                logger.info("Removed old json/ folder")
+
+        # List of (old_filename_in_root, new_path) tuples for root migrations
         files_to_migrate = [
             ("collections.json", self.collections_file),
             ("videos.json", self.videos_file),
             ("download_queue.json", self.queue_file),
-            ("available_collections.json", self.json_dir / "available_collections.json"),
+            ("available_collections.json", self.data_subdir / "available_collections.json"),
             ("data.js", self.data_js_file),
-            ("viewer.html", self.viewer_file),
         ]
 
         migrated = []
@@ -132,7 +152,7 @@ class DataStore:
                 migrated.append(old_name)
 
         if migrated:
-            logger.info(f"Migrated {len(migrated)} file(s) to json/ folder: {', '.join(migrated)}")
+            logger.info(f"Migrated {len(migrated)} file(s) to data/ folder: {', '.join(migrated)}")
 
     def _reconcile_with_disk(self):
         """Scan disk and update download status, clean up incomplete downloads."""
@@ -315,7 +335,7 @@ class DataStore:
 
     def _write_available_collections(self):
         """Write a reference file listing all available collections for exclusion config."""
-        available_file = self.json_dir / "available_collections.json"
+        available_file = self.data_subdir / "available_collections.json"
         collections_list = []
         for coll_id, coll in self.collections.items():
             collections_list.append({
