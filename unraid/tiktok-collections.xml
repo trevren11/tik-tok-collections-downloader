@@ -11,8 +11,9 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/trevren11/tik-tok-collections-downloader/issues</Support>
   <Project>https://github.com/trevren11/tik-tok-collections-downloader</Project>
-  <Overview>Automatically monitor and download TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure. Runs on a configurable schedule to keep your collection up to date.</Overview>
-  <Category>MediaApp:Video Downloaders:Other</Category>
+  <Overview>Automatically monitor and download TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure. Runs on a configurable schedule to keep your collection up to date.[br][br]Features: Automated monitoring, web viewer interface, organized by collection, metadata preservation.</Overview>
+  <Category>MediaApp:Video Downloaders:MediaApp:Other</Category>
+  <TemplateURL>https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/unraid/tiktok-collections.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/icon.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <Description>Automatically monitor and download TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure.</Description>
