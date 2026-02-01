@@ -220,3 +220,4 @@ __marimo__/
 
 # Personal import commands
 import/my-commands.sh
+.claude/settings.local.json

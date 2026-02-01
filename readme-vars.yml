@@ -1,0 +1,88 @@
+---
+# project information
+project_name: tiktok-collections-downloader
+project_url: "https://github.com/trevren11/tik-tok-collections-downloader"
+project_logo: "https://raw.githubusercontent.com/trevren11/tik-tok-collections-downloader/main/icon.png"
+project_blurb: |
+  [{{ project_name|capitalize }}]({{ project_url }}) automatically monitors and downloads TikTok collections. Syncs your saved TikTok videos to local storage with organized folder structure. Runs on a configurable schedule to keep your collection up to date.
+
+# supported architectures
+available_architectures:
+  - {arch: "{{ arch_x86_64 }}", tag: "amd64-latest"}
+  - {arch: "{{ arch_arm64 }}", tag: "arm64v8-latest"}
+
+# container parameters
+param_container_name: "{{ project_name }}"
+param_usage_include_net: true
+param_net: "bridge"
+param_usage_include_ports: true
+param_ports:
+  - {external_port: "2507", internal_port: "8425", port_desc: "Web viewer interface"}
+
+param_usage_include_vols: true
+param_volumes:
+  - {vol_path: "/app/config", vol_host_path: "/path/to/config", desc: "Store config.json with your TikTok session credentials"}
+  - {vol_path: "/app/downloads", vol_host_path: "/path/to/downloads", desc: "Downloaded TikTok videos storage"}
+
+param_usage_include_env: true
+param_env_vars:
+  - {env_var: "TZ", env_value: "America/New_York", desc: "Specify a timezone to use (e.g., America/New_York)"}
+  - {env_var: "TIKTOK_SESSION_ID", env_value: "", desc: "Your TikTok sessionid cookie (get from browser DevTools). **Required for authentication.**"}
+
+# optional parameters
+opt_param_usage_include_env: true
+opt_param_env_vars:
+  - {env_var: "VIEWER_PORT", env_value: "8425", desc: "Internal container port for viewer server (must match port mapping)"}
+  - {env_var: "SYNC_INTERVAL", env_value: "120", desc: "How often to check for new videos (in minutes)"}
+  - {env_var: "MAX_PARALLEL", env_value: "3", desc: "Number of parallel video downloads"}
+  - {env_var: "DOWNLOAD_LIMIT", env_value: "", desc: "Limit downloads per sync cycle (e.g., 5 for testing). Leave empty for unlimited."}
+  - {env_var: "FULL_SYNC", env_value: "false", desc: "Force full sync of all collections (fetch ALL pages, not just recent ~30)"}
+  - {env_var: "FETCH_ALL_FAVORITES", env_value: "false", desc: "Fetch ALL favorited videos using API pagination on startup (one-time operation)"}
+  - {env_var: "PYTHONUNBUFFERED", env_value: "1", desc: "Enable real-time log output"}
+
+# application setup block
+app_setup_block_enabled: true
+app_setup_block: |
+  ## Getting Started
+
+  ### 1. Obtain TikTok Session ID
+
+  To authenticate with TikTok, you need your `sessionid` cookie:
+
+  1. Open TikTok in your browser and log in
+  2. Open browser DevTools (F12)
+  3. Go to Application/Storage → Cookies → https://www.tiktok.com
+  4. Find the `sessionid` cookie and copy its value
+  5. Set this value in the `TIKTOK_SESSION_ID` environment variable
+
+  ### 2. Configuration
+
+  The container can be configured via environment variables or a `config.json` file in the `/app/config` directory.
+
+  **Example config.json:**
+  ```json
+  {
+    "sessionid": "your-session-id-here"
+  }
+  ```
+
+  ### 3. Access Web Viewer
+
+  Once running, access the web viewer at: `http://your-server-ip:2507/json/viewer.html`
+
+  The viewer displays your downloaded videos organized by collection with metadata and captions.
+
+  ### 4. Monitoring
+
+  The container will automatically:
+  - Check for new videos based on `SYNC_INTERVAL` (default: every 2 hours)
+  - Download videos with metadata to the specified downloads directory
+  - Organize videos by collection folders
+  - Skip already downloaded videos
+
+  For troubleshooting, check the container logs for sync status and any errors.
+
+# changelog
+changelogs:
+  - {date: "01.02.2026:", desc: "Add web viewer server and Unraid template support"}
+  - {date: "Initial Release:", desc: "First release with automated TikTok collection downloading"}
