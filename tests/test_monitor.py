@@ -879,14 +879,14 @@ class TestJsonFolderMigration(TestCase):
         """Clean up temporary directory."""
         shutil.rmtree(self.temp_dir)
 
-    def test_creates_json_folder(self):
-        """DataStore should create json/ subfolder."""
+    def test_creates_data_folder(self):
+        """DataStore should create data/ subfolder."""
         DataStore(self.temp_dir)
-        json_dir = Path(self.temp_dir) / "json"
-        self.assertTrue(json_dir.exists(), "json/ subfolder should be created")
+        data_dir = Path(self.temp_dir) / "data"
+        self.assertTrue(data_dir.exists(), "data/ subfolder should be created")
 
-    def test_files_created_in_json_folder(self):
-        """JSON files should be created in json/ subfolder."""
+    def test_files_created_in_data_folder(self):
+        """JSON files should be created in data/ subfolder."""
         store = DataStore(self.temp_dir)
         store.update_collection("123", {"id": "123", "name": "Test"})
         store.save_collections()
