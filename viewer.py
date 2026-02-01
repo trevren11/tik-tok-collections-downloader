@@ -30,8 +30,8 @@ class ViewerHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="TikTok Collections Viewer Server")
-    parser.add_argument("-p", "--port", type=int, default=8425,
-                        help="Port to serve on (default: 8425)")
+    parser.add_argument("-p", "--port", type=int, default=2507,
+                        help="Port to serve on (default: 2507)")
     parser.add_argument("-d", "--directory", default="downloads",
                         help="Downloads directory to serve (default: downloads)")
     args = parser.parse_args()

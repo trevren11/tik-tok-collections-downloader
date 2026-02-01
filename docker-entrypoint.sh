@@ -25,7 +25,7 @@ else
 fi
 
 # Start the viewer server in the background
-VIEWER_PORT="${VIEWER_PORT:-8425}"
+VIEWER_PORT="${VIEWER_PORT:-2507}"
 echo "Starting viewer server on port ${VIEWER_PORT}..."
 python -u viewer.py -p "${VIEWER_PORT}" -d /app/downloads &
 VIEWER_PID=$!
