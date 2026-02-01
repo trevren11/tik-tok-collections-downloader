@@ -6,6 +6,9 @@ services:
     # build: .
     container_name: tiktok-collections
     restart: unless-stopped
+    ports:
+      # Web viewer interface
+      - "2507:8425"
     volumes:
       # Mount your config file
       - ./config.json:/app/config/config.json:ro
@@ -24,5 +27,15 @@ services:
       - FULL_SYNC=${FULL_SYNC:-false}
       # Set to "true" to fetch ALL favorites on startup (one-time operation)
       - FETCH_ALL_FAVORITES=${FETCH_ALL_FAVORITES:-false}
+      # Limit number of collections to sync (for testing)
+      - COLLECTION_LIMIT=${COLLECTION_LIMIT:-}
+      # Limit videos fetched per collection (for testing)
+      - VIDEO_LIMIT=${VIDEO_LIMIT:-}
+      # Maximum parallel downloads (default: 3)
+      - MAX_PARALLEL=${MAX_PARALLEL:-3}
+      # Limit downloads per sync cycle (for testing)
+      - DOWNLOAD_LIMIT=${DOWNLOAD_LIMIT:-}
+      # Viewer server port (default: 8425)
+      - VIEWER_PORT=${VIEWER_PORT:-8425}
     # Uncomment to run specific commands instead of watch mode:
     # command: ["python", "tiktok_monitor.py", "--sync"]
