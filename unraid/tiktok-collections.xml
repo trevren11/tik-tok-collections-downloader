@@ -33,8 +33,8 @@
       <Mode>rw</Mode>
     </Volume>
   </Data>
-  <Config Name="WebUI Port" Target="8425" Default="2507" Mode="tcp" Description="Host port to access the web viewer (maps to container port 8425)" Type="Port" Display="always" Required="true" Mask="false">2507</Config>
-  <Config Name="Viewer Container Port" Target="VIEWER_PORT" Default="8425" Mode="" Description="Internal container port for viewer server (must match Port Target above)" Type="Variable" Display="advanced" Required="false" Mask="false">8425</Config>
+  <Config Name="WebUI Port" Target="2507" Default="2507" Mode="tcp" Description="Host port to access the web viewer (maps to container port 2507)" Type="Port" Display="always" Required="true" Mask="false">2507</Config>
+  <Config Name="Viewer Container Port" Target="VIEWER_PORT" Default="2507" Mode="" Description="Internal container port for viewer server (must match Port Target above)" Type="Variable" Display="advanced" Required="false" Mask="false">2507</Config>
   <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/tiktok-collections" Mode="rw" Description="Path to store config.json with your TikTok session credentials" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/tiktok-collections</Config>
   <Config Name="Downloads Directory" Target="/app/downloads" Default="/mnt/user/downloads/tiktok" Mode="rw" Description="Path where TikTok videos will be downloaded" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/downloads/tiktok</Config>
   <Config Name="TikTok Session ID" Target="TIKTOK_SESSION_ID" Default="" Mode="" Description="Your TikTok sessionid cookie (get from browser DevTools). Required for authentication." Type="Variable" Display="always" Required="true" Mask="true"></Config>

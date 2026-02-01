@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     ports:
       # Web viewer interface
-      - "2507:8425"
+      - "2507:2507"
     volumes:
       # Mount your config file
       - ./config.json:/app/config/config.json:ro
@@ -35,7 +35,7 @@ services:
       - MAX_PARALLEL=${MAX_PARALLEL:-3}
       # Limit downloads per sync cycle (for testing)
       - DOWNLOAD_LIMIT=${DOWNLOAD_LIMIT:-}
-      # Viewer server port (default: 8425)
-      - VIEWER_PORT=${VIEWER_PORT:-8425}
+      # Viewer server port (default: 2507)
+      - VIEWER_PORT=${VIEWER_PORT:-2507}
     # Uncomment to run specific commands instead of watch mode:
     # command: ["python", "tiktok_monitor.py", "--sync"]

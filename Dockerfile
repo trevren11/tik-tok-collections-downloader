@@ -37,8 +37,8 @@ COPY tests/ ./tests/
 # Create volume mount points
 VOLUME ["/app/config", "/app/downloads"]
 
-# Expose viewer port (configurable via VIEWER_PORT env var, default 8425)
-EXPOSE 8425
+# Expose viewer port (configurable via VIEWER_PORT env var, default 2507)
+EXPOSE 2507
 
 # Default command runs the entrypoint script
 COPY docker-entrypoint.sh /docker-entrypoint.sh
