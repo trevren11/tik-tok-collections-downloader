@@ -147,7 +147,7 @@ python viewer.py -p 8080
 python viewer.py -d /path/to/downloads
 ```
 
-Open http://localhost:8425/json/viewer.html in your browser (or http://localhost:2507/json/viewer.html if using Docker with default port mapping) to:
+Open http://localhost:8425/viewer.html in your browser to:
 - Browse collections
 - Watch videos with metadata displayed
 - See download status
@@ -298,7 +298,7 @@ After running the downloader, your data directory will look like:
 
 ```
 downloads/
-├── json/                          # Metadata files
+├── data/                          # Metadata files
 │   ├── collections.json           # Collection metadata
 │   ├── videos.json                # Video metadata
 │   ├── download_queue.json        # Download state (pending/completed/failed)
@@ -379,7 +379,7 @@ Downloads use automatic exponential backoff when rate limited:
 ### Migration from Previous Versions
 
 If upgrading from a version that stored JSON files in the download root:
-- Files are **automatically migrated** to the `json/` subfolder on first run
+- Files are **automatically migrated** to the `data/` subfolder on first run
 - No manual action required
 - Video files remain in place (only metadata files move)
 

@@ -68,7 +68,7 @@ app_setup_block: |
 
   ### 3. Access Web Viewer
 
-  Once running, access the web viewer at: `http://your-server-ip:8425/json/viewer.html`
+  Once running, access the web viewer at: `http://your-server-ip:8425/viewer.html`
 
   The viewer displays your downloaded videos organized by collection with metadata and captions.
 

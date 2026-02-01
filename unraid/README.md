@@ -50,10 +50,10 @@ Once approved, search for "TikTok Collections" in Community Applications and cli
 
 Once the container is running, access the viewer at:
 ```
-http://[YOUR-UNRAID-IP]:[PORT]/json/viewer.html
+http://[YOUR-UNRAID-IP]:[PORT]/viewer.html
 ```
 
-Example: `http://192.168.1.100:2507/json/viewer.html`
+Example: `http://192.168.1.100:8425/viewer.html`
 
 ## Troubleshooting
 
