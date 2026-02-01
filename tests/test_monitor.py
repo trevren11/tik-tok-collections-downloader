@@ -1797,6 +1797,109 @@ class TestDownloadWorker(TestCase):
         self.assertEqual(self.store.queue["failed"][0]["id"], "vid1")
 
 
+class TestDataFolderExclusion(TestCase):
+    """Tests to ensure 'data' folder is properly excluded from collection iteration."""
+
+    def setUp(self):
+        """Create a temporary directory for test data."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.store = DataStore(self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_reconcile_skips_data_folder(self):
+        """_reconcile_with_disk should skip the 'data' folder."""
+        # Create data folder and a real collection folder
+        data_folder = Path(self.temp_dir) / "data"
+        data_folder.mkdir(exist_ok=True)
+        (data_folder / "test_file.json").write_text('{"test": "data"}')
+
+        collection_folder = Path(self.temp_dir) / "TestCollection"
+        video_folder = collection_folder / "vid123"
+        video_folder.mkdir(parents=True)
+        (video_folder / "vid123.mp4").touch()
+
+        # Run reconciliation (should not try to process data folder as collection)
+        self.store._reconcile_with_disk()
+
+        # Data folder should still exist with its files intact
+        self.assertTrue(data_folder.exists())
+        self.assertTrue((data_folder / "test_file.json").exists())
+
+    def test_data_folder_not_treated_as_collection(self):
+        """The 'data' subfolder should never be treated as a video collection."""
+        # Create some test collections
+        self.store.update_collection("123", {"id": "123", "name": "Real Collection"})
+        self.store.save_collections()
+
+        # Create collection folder on disk
+        collection_folder = Path(self.temp_dir) / "Real Collection"
+        collection_folder.mkdir()
+
+        # Data folder should exist
+        data_folder = Path(self.temp_dir) / "data"
+        self.assertTrue(data_folder.exists())
+
+        # Get list of directories in data_dir that are not 'data' folder
+        actual_collections = [
+            d for d in Path(self.temp_dir).iterdir()
+            if d.is_dir() and not d.name.startswith(".") and d.name != "data"
+        ]
+
+        # Should only have the real collection, not 'data'
+        self.assertEqual(len(actual_collections), 1)
+        self.assertEqual(actual_collections[0].name, "Real Collection")
+
+    def test_json_folder_migration_removes_old_folder(self):
+        """Migration should remove old 'json' folder and replace with 'data'."""
+        # Create old json folder structure
+        json_folder = Path(self.temp_dir) / "json"
+        json_folder.mkdir()
+        (json_folder / "collections.json").write_text('{"test": {"id": "test", "name": "Test"}}')
+        (json_folder / "videos.json").write_text('{"test_vid": {"id": "test_vid"}}')
+
+        # Initialize DataStore (should migrate)
+        store = DataStore(self.temp_dir)
+
+        # json folder should be gone
+        self.assertFalse(json_folder.exists(), "Old 'json' folder should be removed after migration")
+
+        # data folder should exist with migrated files
+        data_folder = Path(self.temp_dir) / "data"
+        self.assertTrue(data_folder.exists(), "'data' folder should exist after migration")
+        self.assertTrue((data_folder / "collections.json").exists())
+        self.assertTrue((data_folder / "videos.json").exists())
+
+        # Data should be preserved
+        self.assertIn("test", store.collections)
+        self.assertIn("test_vid", store.videos)
+
+    def test_no_json_folder_in_new_installations(self):
+        """New installations should only create 'data' folder, never 'json'."""
+        # Create fresh DataStore
+        store = DataStore(self.temp_dir)
+
+        # Add and save some data
+        store.update_collection("123", {"id": "123", "name": "Test Collection"})
+        store.add_video("vid1", {"id": "vid1", "author": "user1"})
+        store.save_collections()
+        store.save_videos()
+
+        # Should have data folder
+        data_folder = Path(self.temp_dir) / "data"
+        self.assertTrue(data_folder.exists(), "'data' folder should exist")
+
+        # Should NOT have json folder
+        json_folder = Path(self.temp_dir) / "json"
+        self.assertFalse(json_folder.exists(), "'json' folder should not be created in new installations")
+
+        # Files should be in data folder
+        self.assertTrue((data_folder / "collections.json").exists())
+        self.assertTrue((data_folder / "videos.json").exists())
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()
