@@ -13,9 +13,12 @@ from pathlib import Path
 class ViewerHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Custom handler to serve from the downloads directory."""
 
+    # Class variable to store the directory path
+    serve_directory = None
+
     def __init__(self, *args, **kwargs):
-        # Serve from downloads directory
-        super().__init__(*args, directory=str(Path("downloads").absolute()), **kwargs)
+        # Serve from the configured directory
+        super().__init__(*args, directory=ViewerHTTPRequestHandler.serve_directory, **kwargs)
 
     def end_headers(self):
         # Add CORS headers to allow local access
@@ -50,6 +53,9 @@ def main():
     else:
         print(f"⚠ Warning: viewer.html not found at {viewer_path}")
         print("  Run the monitor first to generate the viewer")
+
+    # Set the directory for the handler to serve from
+    ViewerHTTPRequestHandler.serve_directory = str(downloads_dir.absolute())
 
     # Start server
     with socketserver.TCPServer(("", args.port), ViewerHTTPRequestHandler) as httpd:
